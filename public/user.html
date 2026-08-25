@@ -1,9 +1,11 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="Real-time web control panel for 6-DOF STM32 robotic arm with virtual joysticks and teach-and-replay">
+  <meta name="description"
+    content="Real-time web control panel for 6-DOF STM32 robotic arm with virtual joysticks and teach-and-replay">
   <title>Robotic Arm — Control Panel</title>
   <link rel="stylesheet" href="styles.css">
   <style>
@@ -17,11 +19,19 @@
 
     .joystick-zone {
       display: flex;
+      flex-direction: row;
+      /* always horizontal */
       justify-content: space-around;
       align-items: center;
-      flex-wrap: wrap;
+      flex-wrap: nowrap;
+      /* never stack vertically */
       gap: var(--gap-lg);
       padding: var(--gap-lg);
+    }
+
+    .joystick-container {
+      flex: 0 0 auto;
+      /* don't shrink below canvas size */
     }
 
     .teach-controls {
@@ -43,18 +53,23 @@
       .control-grid {
         grid-template-columns: 1fr;
       }
-      .joystick-zone {
-        flex-direction: column;
+
+      /* joystick-zone stays horizontal on mobile — only scale the canvases down */
+      .joystick-canvas {
+        width: 130px !important;
+        height: 130px !important;
       }
     }
   </style>
 </head>
+
 <body>
   <div class="app-container">
 
     <!-- ═══════════════════════════ HEADER ═══════════════════════════ -->
     <header class="header" id="header">
       <div>
+        <div id="usernameDisplay" style="font-size: 0.85rem; color: var(--accent-cyan); font-weight: bold; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 1px;"></div>
         <div class="header-title">🤖 Robotic Arm Control</div>
         <div class="header-subtitle">6-DOF Real-Time Web Controller</div>
       </div>
@@ -66,8 +81,8 @@
         <span class="badge badge-cyan" id="latencyBadge" style="display:none;">
           <span id="latencyValue">--</span>ms
         </span>
-        <span class="badge badge-yellow" id="controllerBadge" style="display:none;">
-          USER CONTROL
+        <span class="badge badge-yellow" id="driverBadge" style="display:none;">
+          DRIVING
         </span>
       </div>
     </header>
@@ -77,8 +92,15 @@
       🔒 ADMIN HAS LOCKED USER INPUT — Controls Disabled
     </div>
 
+    <!-- ═══════════════════ SPECTATOR BANNER ═══════════════════ -->
+    <div class="lock-banner" id="spectatorBanner"
+      style="background: var(--bg-card); border-color: var(--accent-cyan); color: var(--text-primary); display: block;">
+      👀 SPECTATOR MODE — Waiting for Admin to grant drive access
+    </div>
+
     <!-- ═══════════════════ E-STOP BANNER ═══════════════════ -->
-    <div class="lock-banner" id="estopBanner" style="background: var(--accent-red-dim); border-color: var(--accent-red);">
+    <div class="lock-banner" id="estopBanner"
+      style="background: var(--accent-red-dim); border-color: var(--accent-red);">
       ⛔ EMERGENCY STOP ENGAGED — All Motors Halted
     </div>
 
@@ -117,7 +139,8 @@
 
       <!-- Controls row -->
       <div class="teach-controls">
-        <button class="btn btn-primary" id="btnRecord" title="Capture current joint angles as a frame">⏺ Record Frame</button>
+        <button class="btn btn-primary" id="btnRecord" title="Capture current joint angles as a frame">⏺ Record
+          Frame</button>
         <button class="btn btn-success" id="btnPlay" title="Play recorded path once">▶ Play Path</button>
         <button class="btn btn-success" id="btnLoop" title="Loop recorded path continuously">🔁 Loop Path</button>
         <button class="btn btn-warning" id="btnPause" title="Pause playback">⏸ Pause</button>
@@ -159,4 +182,5 @@
 
   <script src="user.js"></script>
 </body>
+
 </html>

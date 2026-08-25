@@ -80,6 +80,15 @@ let wsConnected = false;          // Connection state flag (volatile in C)
 let reconnectAttempts = 0;        // Backoff counter
 const MAX_RECONNECT_DELAY = 10000; // Max backoff: 10 seconds
 
+let myClientId = null;
+let currentDriverId = null;
+let eStopActive = false;
+let userInputLocked = false;
+
+function isDriver() {
+  return myClientId && myClientId === currentDriverId;
+}
+
 // Heartbeat interval ID — like a recurring timer interrupt
 let heartbeatInterval = null;
 const HEARTBEAT_RATE = 500;       // Send heartbeat every 500ms
@@ -97,8 +106,16 @@ const THROTTLE_MS = 20;           // 50Hz max send rate
  * Analogous to initializing a UART peripheral with interrupt-driven RX.
  */
 function connect() {
+  const urlParams = new URLSearchParams(window.location.search);
+  const token = urlParams.get('token') || sessionStorage.getItem('robotic_arm_token');
+  
+  if (!token) {
+    window.location.href = '/login.html';
+    return;
+  }
+
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const url = `${protocol}//${location.host}?role=user`;
+  const url = `${protocol}//${location.host}?role=user&token=${token}`;
 
   ws = new WebSocket(url);
 
@@ -169,7 +186,7 @@ function sendHeartbeat() {
  * Equivalent to a SysTick-gated DMA transfer trigger.
  */
 function sendJointState() {
-  if (!wsConnected) return;
+  if (!wsConnected || !isDriver()) return;
 
   const now = Date.now();
   if (now - lastSendTime < THROTTLE_MS) return;
@@ -188,13 +205,29 @@ function sendJointState() {
 function handleServerMessage(msg) {
   switch (msg.type) {
     case 'init':
+      myClientId = msg.clientId;
+      currentDriverId = msg.activeDriverId;
+      eStopActive = !!msg.eStopActive;
+      userInputLocked = !!msg.userInputLocked;
+      updateDriverUI();
+      
+      const userDisplay = document.getElementById('usernameDisplay');
+      if (userDisplay && msg.username) {
+        userDisplay.textContent = '👤 ' + msg.username;
+      }
+
       // Initial state sync from server (like reading config registers after boot)
       if (msg.jointState) {
         Object.assign(jointState, msg.jointState);
         syncSlidersFromState();
       }
-      if (msg.eStopActive) showEstopBanner(true);
-      if (msg.userInputLocked) showLockBanner(true);
+      if (eStopActive) showEstopBanner(true);
+      if (userInputLocked) showLockBanner(true);
+      break;
+
+    case 'driver_assigned':
+      currentDriverId = msg.driverId;
+      updateDriverUI();
       break;
 
     case 'heartbeat_ack':
@@ -203,11 +236,15 @@ function handleServerMessage(msg) {
       break;
 
     case 'estop_state':
+      eStopActive = msg.active;
       showEstopBanner(msg.active);
+      updateDriverUI();
       break;
 
     case 'lock_state':
+      userInputLocked = msg.locked;
       showLockBanner(msg.locked);
+      updateDriverUI();
       break;
 
     case 'locked':
@@ -242,8 +279,9 @@ const DOM = {
   statusText:      document.getElementById('statusText'),
   latencyBadge:    document.getElementById('latencyBadge'),
   latencyValue:    document.getElementById('latencyValue'),
-  controllerBadge: document.getElementById('controllerBadge'),
+  driverBadge:     document.getElementById('driverBadge'),
   lockBanner:      document.getElementById('lockBanner'),
+  spectatorBanner: document.getElementById('spectatorBanner'),
   estopBanner:     document.getElementById('estopBanner'),
   sliderGroup:     document.getElementById('sliderGroup'),
   framesBody:      document.getElementById('framesBody'),
@@ -258,7 +296,26 @@ function updateConnectionUI(connected) {
   DOM.statusPill.className = `status-pill ${connected ? 'connected' : 'disconnected'}`;
   DOM.statusText.textContent = connected ? 'Connected' : 'Disconnected';
   DOM.latencyBadge.style.display = connected ? 'inline-flex' : 'none';
-  DOM.controllerBadge.style.display = connected ? 'inline-flex' : 'none';
+  if (connected) {
+    updateDriverUI();
+  } else {
+    DOM.driverBadge.style.display = 'none';
+    DOM.spectatorBanner.classList.remove('visible');
+  }
+}
+
+function updateDriverUI() {
+  if (!wsConnected) return;
+  const driver = isDriver();
+  DOM.spectatorBanner.classList.toggle('visible', !driver);
+  DOM.driverBadge.style.display = driver ? 'inline-flex' : 'none';
+  
+  // Disable UI elements if not driver or if locked
+  const disabled = !driver || userInputLocked || eStopActive;
+  for (const joint of JOINT_CONFIG) {
+    const el = sliderElements[joint.key];
+    if (el) el.slider.disabled = disabled;
+  }
 }
 
 function updateLatencyUI(ms) {
@@ -565,6 +622,26 @@ class VirtualJoystick {
 
     // Send to server (throttled)
     sendJointState();
+  }
+
+  /**
+   * Update knob position visually based on external changes to jointState.
+   * Called when keyboard controls update the angles.
+   */
+  syncKnobFromState() {
+    if (this.active) return; // Don't snap if user is actively dragging
+
+    // Reverse map: [0, 180] -> [-1.0, 1.0] -> canvas coordinates
+    const normalizedX = (jointState[this.xKey] / 90) - 1.0;
+    const normalizedY = (jointState[this.yKey] / 90) - 1.0;
+
+    this.knobX = this.center + (normalizedX * this.outerRadius);
+    this.knobY = this.center + (normalizedY * this.outerRadius);
+
+    // Update display text
+    this.valueDisplay.textContent = `X: ${jointState[this.xKey]}° — Y: ${jointState[this.yKey]}°`;
+
+    this.render();
   }
 
   /**
@@ -964,6 +1041,68 @@ function clearFrameHighlights() {
 
   // 5. Connect WebSocket (like HAL_UART_Init + enabling RX interrupt)
   connect();
+
+  // 6. Keyboard controls for joysticks
+  window.addEventListener('keydown', (e) => {
+    if (!wsConnected || !isDriver() || userInputLocked || eStopActive) return;
+    
+    // Prevent scrolling for arrow keys
+    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) {
+      e.preventDefault();
+    }
+    
+    let changed = false;
+    const step = 5; // Degrees per keypress tick
+
+    switch(e.key) {
+      // Left Joystick (J1/J2) - Arrow Keys
+      case 'ArrowLeft':
+        jointState.J1 = Math.max(0, jointState.J1 - step);
+        changed = true;
+        break;
+      case 'ArrowRight':
+        jointState.J1 = Math.min(180, jointState.J1 + step);
+        changed = true;
+        break;
+      case 'ArrowUp':
+        jointState.J2 = Math.min(180, jointState.J2 + step);
+        changed = true;
+        break;
+      case 'ArrowDown':
+        jointState.J2 = Math.max(0, jointState.J2 - step);
+        changed = true;
+        break;
+        
+      // Right Joystick (J3/J4) - WASD Keys
+      case 'w':
+      case 'W':
+        jointState.J4 = Math.min(180, jointState.J4 + step);
+        changed = true;
+        break;
+      case 's':
+      case 'S':
+        jointState.J4 = Math.max(0, jointState.J4 - step);
+        changed = true;
+        break;
+      case 'a':
+      case 'A':
+        jointState.J3 = Math.max(0, jointState.J3 - step);
+        changed = true;
+        break;
+      case 'd':
+      case 'D':
+        jointState.J3 = Math.min(180, jointState.J3 + step);
+        changed = true;
+        break;
+    }
+
+    if (changed) {
+      syncSlidersFromState();
+      sendJointState();
+      joystickLeft.syncKnobFromState();
+      joystickRight.syncKnobFromState();
+    }
+  });
 
   console.log('[BOOT] Init complete — all subsystems online.');
 })();

@@ -63,6 +63,8 @@ let userInputLocked = false;      // User lock state
 let serialConnected = false;      // Serial port open flag
 let consoleFilter = 'all';        // Console filter: 'all', 'tx', 'rx'
 let consoleLinesCount = 0;        // Current console line count
+let activeDriverId = null;        // Track the single driver
+let lastKnownClients = null;
 
 /* ===========================================================================
  *  DOM REFERENCES (register pointers)
@@ -84,6 +86,7 @@ const DOM = {
   toggleLockUsers:     document.getElementById('toggleLockUsers'),
 
   // Client list
+  authRequestsList:    document.getElementById('authRequestsList'),
   clientList:          document.getElementById('clientList'),
 
   // Serial
@@ -205,6 +208,7 @@ function handleServerMessage(msg) {
       eStopEngaged = msg.eStopActive || false;
       userInputLocked = msg.userInputLocked || false;
       serialConnected = msg.serialConnected || false;
+      activeDriverId = msg.activeDriverId || null;
 
       updateEstopUI();
       DOM.toggleLockUsers.checked = userInputLocked;
@@ -214,6 +218,16 @@ function handleServerMessage(msg) {
       if (msg.jointState) updateJointReadout(msg.jointState);
 
       logEvent('sys', `Init complete — E-STOP: ${eStopEngaged}, Lock: ${userInputLocked}, Serial: ${serialConnected}`);
+      break;
+
+    case 'auth_request':
+      logEvent('sys', `Access requested by ${msg.username}. OTP: ${msg.code}`);
+      break;
+
+    case 'driver_assigned':
+      activeDriverId = msg.driverId;
+      logEvent('sys', `Driver access assigned to ${activeDriverId || 'NONE'}`);
+      if (lastKnownClients) updateClientList(lastKnownClients);
       break;
 
     /* ── Heartbeat ACK — latency measurement ── */
@@ -606,6 +620,11 @@ function updateTelemetryDisplay(data) {
     updateClientList(data.connectedClients);
   }
 
+  // Update auth requests
+  if (data.activeAuthRequests) {
+    updateAuthRequests(data.activeAuthRequests);
+  }
+
   // Update serial status
   if (data.serialConnected !== undefined) {
     serialConnected = data.serialConnected;
@@ -701,6 +720,7 @@ function drawUserPreview(joints) {
 
 /** Update connected clients list. */
 function updateClientList(clientsList) {
+  lastKnownClients = clientsList;
   if (!clientsList || clientsList.length === 0) {
     DOM.clientList.innerHTML = '<div style="color: var(--text-muted); font-size: 0.72rem; font-family: var(--font-mono);">No clients connected</div>';
     return;
@@ -712,11 +732,51 @@ function updateClientList(clientsList) {
     item.className = 'client-item';
 
     const roleBadgeClass = client.role === 'admin' ? 'badge-yellow' : 'badge-cyan';
+    const usernameStr = client.username ? ` (${escapeHtml(client.username)})` : '';
+    
+    // Grant/Revoke button for users
+    let actionBtn = '';
+    if (client.role === 'user') {
+      if (activeDriverId === client.id) {
+        actionBtn = `<button class="btn btn-sm btn-danger" onclick="setDriver(null)">Revoke</button>`;
+      } else {
+        actionBtn = `<button class="btn btn-sm btn-primary" onclick="setDriver('${client.id}')">Grant Control</button>`;
+      }
+    }
+
     item.innerHTML = `
-      <span class="client-id">${client.id}</span>
-      <span class="badge ${roleBadgeClass}">${client.role}</span>
+      <div style="display:flex; align-items:center; gap:var(--gap-sm);">
+        <span class="client-id">${client.id}${usernameStr}</span>
+        <span class="badge ${roleBadgeClass}">${client.role}</span>
+        ${activeDriverId === client.id ? '<span class="badge badge-green">DRIVER</span>' : ''}
+      </div>
+      <div>${actionBtn}</div>
     `;
     DOM.clientList.appendChild(item);
+  }
+}
+
+window.setDriver = function(clientId) {
+  if (wsConnected) {
+    ws.send(JSON.stringify({ type: 'assign_driver', clientId: clientId }));
+  }
+};
+
+function updateAuthRequests(requests) {
+  if (!requests || requests.length === 0) {
+    DOM.authRequestsList.innerHTML = '<div style="color: var(--text-muted); font-size: 0.72rem; font-family: var(--font-mono);">No pending requests</div>';
+    return;
+  }
+  
+  DOM.authRequestsList.innerHTML = '';
+  for (const req of requests) {
+    const item = document.createElement('div');
+    item.className = 'client-item';
+    item.innerHTML = `
+      <span class="client-id">${escapeHtml(req.username)}</span>
+      <span class="badge badge-yellow" style="font-size: 1rem; letter-spacing: 2px;">${req.code}</span>
+    `;
+    DOM.authRequestsList.appendChild(item);
   }
 }
 

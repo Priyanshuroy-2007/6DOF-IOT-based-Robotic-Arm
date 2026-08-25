@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Secure Access Lobby for Robotic Arm">
+  <title>Robotic Arm — Lobby</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      background: var(--bg-body);
+      margin: 0;
+    }
+    .login-card {
+      width: 100%;
+      max-width: 400px;
+      padding: var(--gap-xl);
+    }
+    .login-header {
+      text-align: center;
+      margin-bottom: var(--gap-xl);
+    }
+    .login-header h1 {
+      margin: 0 0 var(--gap-xs);
+      font-size: 1.5rem;
+      color: var(--text-primary);
+    }
+    .login-header p {
+      margin: 0;
+      color: var(--text-muted);
+      font-size: 0.85rem;
+    }
+    .form-group {
+      margin-bottom: var(--gap-lg);
+    }
+    .form-group label {
+      display: block;
+      margin-bottom: var(--gap-xs);
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      color: var(--text-secondary);
+    }
+    .form-group input {
+      width: 100%;
+      padding: 12px;
+      background: var(--bg-input);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      color: var(--text-primary);
+      font-size: 1rem;
+      box-sizing: border-box;
+      transition: all 0.2s ease;
+    }
+    .form-group input:focus {
+      outline: none;
+      border-color: var(--accent-cyan);
+      box-shadow: 0 0 0 2px rgba(0, 229, 255, 0.15);
+    }
+    .btn-block {
+      width: 100%;
+      padding: 12px;
+      font-size: 1rem;
+    }
+    #step2 {
+      display: none; /* Hidden initially */
+    }
+    .status-msg {
+      margin-top: var(--gap-md);
+      font-size: 0.85rem;
+      text-align: center;
+      min-height: 20px;
+    }
+    .error { color: var(--accent-red); }
+    .info { color: var(--accent-cyan); }
+    .code-display {
+      font-family: var(--font-mono);
+      font-size: 2rem;
+      text-align: center;
+      letter-spacing: 10px;
+      margin: var(--gap-lg) 0;
+      color: var(--accent-cyan);
+    }
+  </style>
+</head>
+<body>
+
+  <div class="card login-card">
+    <div class="login-header">
+      <h1>🤖 Lobby Access</h1>
+      <p>Request entry to the Robotic Arm interface</p>
+    </div>
+
+    <!-- STEP 1: Request Access -->
+    <div id="step1">
+      <div class="form-group">
+        <label for="usernameInput">YOUR NAME</label>
+        <input type="text" id="usernameInput" placeholder="e.g. Alice" autocomplete="off" maxlength="16">
+      </div>
+      <button class="btn btn-primary btn-block" id="btnRequest" disabled>Request Access</button>
+    </div>
+
+    <!-- STEP 2: Enter Code -->
+    <div id="step2">
+      <div style="text-align: center; color: var(--text-secondary); font-size: 0.85rem; margin-bottom: var(--gap-md);">
+        Request sent! Ask the Admin for your 4-digit entry code.
+      </div>
+      <div class="form-group">
+        <label for="codeInput" style="text-align: center;">4-DIGIT CODE</label>
+        <input type="text" id="codeInput" class="code-display" placeholder="••••" maxlength="4" autocomplete="off">
+      </div>
+      <button class="btn btn-success btn-block" id="btnSubmit">Enter Lobby</button>
+      <button class="btn btn-block" id="btnCancel" style="margin-top: var(--gap-sm);">Cancel</button>
+    </div>
+
+    <div class="status-msg" id="statusMsg">Connecting to server...</div>
+  </div>
+
+  <script src="login.js?v=2"></script>
+</body>
+</html>

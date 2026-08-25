@@ -94,6 +94,10 @@ let serialConnected = false;       // Serial port open state
 let serialPortInstance = null;     // Active SerialPort object
 let serialParser = null;           // Line parser for incoming UART data
 
+const activeAuthRequests = new Map(); // username -> { code, expiresAt }
+const validUserTokens = new Map();    // token -> username
+let activeDriverId = null;            // clientId of the single allowed driver
+
 /**
  * Last joint state sent to serial — used for throttle deduplication.
  * Analogous to a shadow register that caches the last DMA write.
@@ -138,9 +142,9 @@ let rxTimestamps = [];
 const app = express();
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Redirect root to user page
+// Redirect root to login page
 app.get('/', (req, res) => {
-  res.redirect('/user.html');
+  res.redirect('/login.html');
 });
 
 const server = http.createServer(app);
@@ -178,10 +182,19 @@ wss.on('connection', (ws, req) => {
     ws.close(4001, 'Unauthorized');
     return;
   }
+  
+  if (role === 'user') {
+    if (!validUserTokens.has(token)) {
+      ws.send(JSON.stringify({ type: 'error', message: 'Invalid or expired user session' }));
+      ws.close(4001, 'Unauthorized');
+      return;
+    }
+  }
 
   const clientInfo = {
     id: generateClientId(),
     role: role,
+    username: role === 'user' ? validUserTokens.get(token) : (role === 'admin' ? 'Admin' : 'Guest'),
     lastHeartbeat: Date.now(),
     connectedAt: Date.now(),
     lastSendTime: 0,  // Per-client throttle timestamp
@@ -196,9 +209,12 @@ wss.on('connection', (ws, req) => {
   ws.send(JSON.stringify({
     type: 'init',
     role: role,
+    clientId: clientInfo.id,
     eStopActive: eStopActive,
     userInputLocked: userInputLocked,
     serialConnected: serialConnected,
+    activeDriverId: activeDriverId,
+    username: clientInfo.username,
     jointState: lastJointState,
     servoLimits: servoLimits,
     telemetry: getTelemetrySnapshot(),
@@ -227,6 +243,13 @@ wss.on('connection', (ws, req) => {
     clients.delete(ws);
     updateClientCounts();
     broadcastToRole('admin', { type: 'client_disconnected', clientId: clientInfo.id });
+
+    // If active driver disconnects, release the lock
+    if (clientInfo.id === activeDriverId) {
+      activeDriverId = null;
+      console.log('[SAFETY] Active driver disconnected — revoking access');
+      broadcastToAll({ type: 'driver_assigned', driverId: null });
+    }
 
     // If all clients disconnected, send neutral to prevent runaway
     if (clients.size === 0) {
@@ -263,9 +286,43 @@ function routeMessage(ws, clientInfo, msg) {
       ws.send(JSON.stringify({ type: 'heartbeat_ack', timestamp: Date.now() }));
       break;
 
+    /* ---- Login Auth Flow ---- */
+    case 'request_access':
+      if (clientInfo.role === 'login') {
+        const username = msg.username;
+        if (!username) return;
+        const code = Math.floor(1000 + Math.random() * 9000).toString(); // 4 digits
+        activeAuthRequests.set(username, { code, expiresAt: Date.now() + 10 * 60 * 1000 });
+        
+        console.log(`[AUTH] Request from ${username}, code: ${code}`);
+        // Broadcast to admins to display in the dashboard
+        broadcastToRole('admin', { type: 'auth_request', username: username, code: code });
+      }
+      break;
+
+    case 'submit_code':
+      if (clientInfo.role === 'login') {
+        const req = activeAuthRequests.get(msg.username);
+        if (req && req.code === msg.code && Date.now() < req.expiresAt) {
+          activeAuthRequests.delete(msg.username);
+          const sessionToken = 'usr_' + Math.random().toString(36).substr(2, 12);
+          validUserTokens.set(sessionToken, msg.username);
+          ws.send(JSON.stringify({ type: 'auth_success', token: sessionToken }));
+          console.log(`[AUTH] User ${msg.username} authenticated successfully.`);
+        } else {
+          ws.send(JSON.stringify({ type: 'auth_fail', message: 'Invalid or expired code.' }));
+        }
+      }
+      break;
+
     /* ---- Joint state update from user ---- */
     case 'joints':
       if (clientInfo.role === 'user') {
+        // Only active driver can send joints
+        if (activeDriverId !== clientInfo.id) {
+          return; // Silently drop (handled client-side mostly)
+        }
+        
         // Check if user input is locked by admin
         if (userInputLocked) {
           ws.send(JSON.stringify({ type: 'locked', message: 'Admin has locked user input' }));
@@ -343,6 +400,14 @@ function routeMessage(ws, clientInfo, msg) {
         locked: userInputLocked,
         by: clientInfo.id,
       });
+      break;
+
+    /* ---- Assign/Revoke Driver Access (admin only) ---- */
+    case 'assign_driver':
+      if (clientInfo.role !== 'admin') return;
+      activeDriverId = msg.clientId; // null to revoke all
+      console.log(`[ADMIN] Driver access assigned to ${activeDriverId || 'NONE'} by ${clientInfo.id}`);
+      broadcastToAll({ type: 'driver_assigned', driverId: activeDriverId });
       break;
 
     /* ---- Serial port configuration (admin only) ---- */
@@ -573,6 +638,7 @@ function sendToSerial(data) {
   }
 
   // Always log TX to admin console (even if serial disconnected)
+  console.log(`[SERIAL TX] ${data.trim()}`); // Print to terminal
   broadcastToRole('admin', {
     type: 'serial_tx',
     data: data.trim(),
@@ -671,6 +737,7 @@ function getClientList() {
     list.push({
       id: info.id,
       role: info.role,
+      username: info.username,
       connectedAt: info.connectedAt,
       lastHeartbeat: info.lastHeartbeat,
     });
@@ -695,9 +762,11 @@ function getTelemetrySnapshot() {
     eStopActive,
     userInputLocked,
     serialConnected,
+    activeDriverId,
     servoLimits,
     uptimeSeconds: Math.floor((Date.now() - telemetry.uptime) / 1000),
     connectedClients: getClientList(),
+    activeAuthRequests: Array.from(activeAuthRequests.entries()).map(([u, d]) => ({ username: u, code: d.code })),
   };
 }
 
