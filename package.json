@@ -1,0 +1,17 @@
+{
+  "name": "robotic-arm-webui",
+  "version": "1.0.0",
+  "description": "Real-time web control interface for 6-DOF STM32F411 robotic arm with WebSocket relay and serial bridge",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "npx -y nodemon server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "ws": "^8.18.0",
+    "serialport": "^12.0.0"
+  },
+  "keywords": ["robotics", "stm32", "websocket", "serial", "real-time"],
+  "license": "MIT"
+}

@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Admin dashboard for 6-DOF STM32 robotic arm — telemetry, serial bridge, E-STOP, and calibration">
+  <title>Robotic Arm — Admin Dashboard</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    /* ─── Admin-specific layout ─── */
+    .admin-grid {
+      display: grid;
+      grid-template-columns: 340px 1fr;
+      gap: var(--gap-lg);
+      margin-bottom: var(--gap-lg);
+    }
+
+    .sidebar { display: flex; flex-direction: column; gap: var(--gap-lg); }
+    .main-area { display: flex; flex-direction: column; gap: var(--gap-lg); }
+
+    /* E-STOP zone */
+    .estop-zone {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: var(--gap-lg);
+      padding: var(--gap-xl) var(--gap-lg);
+    }
+
+    .estop-hint {
+      font-family: var(--font-mono);
+      font-size: 0.65rem;
+      color: var(--text-muted);
+      text-align: center;
+      max-width: 180px;
+    }
+
+    /* Serial config form */
+    .serial-form {
+      display: flex;
+      flex-direction: column;
+      gap: var(--gap-md);
+    }
+
+    .serial-form-row {
+      display: flex;
+      align-items: center;
+      gap: var(--gap-sm);
+    }
+
+    .serial-form-row label {
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      color: var(--text-secondary);
+      min-width: 50px;
+      text-transform: uppercase;
+    }
+
+    .serial-form-row .select-input,
+    .serial-form-row .text-input {
+      flex: 1;
+    }
+
+    /* Stats grid */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: var(--gap-sm);
+    }
+
+    .stat-card {
+      background: var(--bg-input);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: var(--gap-sm) var(--gap-md);
+      text-align: center;
+    }
+
+    .stat-card .stat-number {
+      font-family: var(--font-mono);
+      font-size: 1.4rem;
+      font-weight: 700;
+      color: var(--accent-cyan);
+      display: block;
+    }
+
+    .stat-card .stat-desc {
+      font-size: 0.65rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    /* Console header */
+    .console-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: var(--gap-sm);
+    }
+
+    .console-filters {
+      display: flex;
+      gap: var(--gap-xs);
+    }
+
+    .console-filters .btn {
+      padding: 3px 8px;
+      font-size: 0.6rem;
+    }
+
+    /* Client list */
+    .client-list {
+      display: flex;
+      flex-direction: column;
+      gap: var(--gap-xs);
+    }
+
+    .client-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: var(--gap-sm) var(--gap-md);
+      background: var(--bg-input);
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border-subtle);
+    }
+
+    .client-item .client-id {
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      color: var(--text-primary);
+    }
+
+    .bottom-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: var(--gap-lg);
+    }
+
+    @media (max-width: 1024px) {
+      .admin-grid { grid-template-columns: 1fr; }
+      .bottom-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app-container">
+
+    <!-- ═══════════════════════════ HEADER ═══════════════════════════ -->
+    <header class="header" id="header">
+      <div>
+        <div class="header-title">⚙️ Admin Dashboard</div>
+        <div class="header-subtitle">Telemetry &amp; Hardware Bridge</div>
+      </div>
+      <div class="header-status">
+        <div class="status-pill disconnected" id="statusPill">
+          <span class="dot"></span>
+          <span id="statusText">Disconnected</span>
+        </div>
+        <span class="badge badge-cyan" id="latencyBadge" style="display:none;">
+          <span id="latencyValue">--</span>ms
+        </span>
+        <span class="badge badge-green" id="uptimeBadge" style="display:none;">
+          Uptime: <span id="uptimeValue">0s</span>
+        </span>
+      </div>
+    </header>
+
+    <!-- ═══════════════════════ MAIN GRID ═══════════════════════ -->
+    <div class="admin-grid">
+
+      <!-- ────────── SIDEBAR ────────── -->
+      <div class="sidebar">
+
+        <!-- ── E-STOP & Master Control ── -->
+        <div class="card">
+          <div class="card-title"><span class="icon">🛑</span> Master Control</div>
+          <div class="estop-zone">
+            <button class="estop-btn" id="btnEstop">
+              <span style="font-size: 1.8rem;">⛔</span>
+              E-STOP
+            </button>
+            <div class="estop-hint" id="estopHint">Click to ENGAGE emergency stop. All motors halt immediately.</div>
+          </div>
+
+          <!-- Lock User Toggle -->
+          <div class="toggle-container" style="padding: 0 var(--gap-md);">
+            <input type="checkbox" class="toggle" id="toggleLockUsers">
+            <span class="toggle-label">Lock User Input / Takeover</span>
+          </div>
+
+          <!-- Connected clients -->
+          <div style="padding: var(--gap-md) var(--gap-md) 0;">
+            <div class="card-title" style="margin-bottom: var(--gap-sm);"><span class="icon">👥</span> Connected Clients</div>
+            <div class="client-list" id="clientList">
+              <div style="color: var(--text-muted); font-size: 0.72rem; font-family: var(--font-mono);">No clients connected</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── Serial / Hardware Bridge ── -->
+        <div class="card">
+          <div class="card-title"><span class="icon">🔌</span> Serial Bridge Manager</div>
+
+          <div class="serial-form" id="serialForm">
+            <div class="serial-form-row">
+              <label>Port</label>
+              <select class="select-input" id="serialPort" style="flex:1;">
+                <option value="">— Select Port —</option>
+              </select>
+              <button class="btn btn-sm" id="btnRefreshPorts" title="Refresh port list">🔄</button>
+            </div>
+
+            <div class="serial-form-row">
+              <label>Baud</label>
+              <select class="select-input" id="serialBaud" style="flex:1;">
+                <option value="9600">9600</option>
+                <option value="19200">19200</option>
+                <option value="38400">38400</option>
+                <option value="57600">57600</option>
+                <option value="115200" selected>115200</option>
+                <option value="230400">230400</option>
+                <option value="460800">460800</option>
+                <option value="921600">921600</option>
+              </select>
+            </div>
+
+            <div class="serial-form-row">
+              <button class="btn btn-success" id="btnSerialConnect" style="flex:1;">⚡ Connect</button>
+              <button class="btn btn-danger" id="btnSerialDisconnect" style="flex:1;" disabled>⏏ Disconnect</button>
+            </div>
+
+            <div class="serial-form-row">
+              <span class="toggle-label">Hardware Heartbeat</span>
+              <div class="heartbeat-led" id="serialHeartbeat"></div>
+              <span class="badge badge-red" id="serialStatusBadge">OFFLINE</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ────────── MAIN AREA ────────── -->
+      <div class="main-area">
+
+        <!-- ── Live Stats ── -->
+        <div class="card">
+          <div class="card-title"><span class="icon">📊</span> Live Telemetry</div>
+          <div class="stats-grid">
+            <div class="stat-card">
+              <span class="stat-number" id="statTxRate">0</span>
+              <span class="stat-desc">TX Rate (pkt/s)</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-number" id="statRxRate">0</span>
+              <span class="stat-desc">RX Rate (pkt/s)</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-number" id="statTxTotal">0</span>
+              <span class="stat-desc">Total TX Packets</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-number" id="statRxTotal">0</span>
+              <span class="stat-desc">Total RX Packets</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-number" id="statUsers">0</span>
+              <span class="stat-desc">Users Online</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-number" id="statAdmins">0</span>
+              <span class="stat-desc">Admins Online</span>
+            </div>
+          </div>
+
+          <!-- Live joint state readout -->
+          <div style="margin-top: var(--gap-md);">
+            <div class="card-title" style="margin-bottom: var(--gap-sm);"><span class="icon">🦾</span> Current Joint State</div>
+            <div id="jointReadout" style="display: grid; grid-template-columns: repeat(6, 1fr); gap: var(--gap-sm);">
+              <!-- Populated by admin.js -->
+            </div>
+            <!-- User Input Preview (read‑only joysticks) -->
+            <div class="card-title" style="margin-top: var(--gap-lg); margin-bottom: var(--gap-sm);"><span class="icon">🎮</span> User Input Preview</div>
+            <div class="preview-grid" style="display: flex; gap: var(--gap-md); justify-content: center;">
+              <canvas id="previewLeft" width="200" height="200"></canvas>
+              <canvas id="previewRight" width="200" height="200"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── Serial Console ── -->
+        <div class="card">
+          <div class="console-header">
+            <div class="card-title" style="margin-bottom:0;"><span class="icon">🖥️</span> Serial Packet Monitor</div>
+            <div class="console-filters">
+              <button class="btn btn-sm btn-primary" id="btnFilterAll" data-filter="all">All</button>
+              <button class="btn btn-sm" id="btnFilterTx" data-filter="tx">TX</button>
+              <button class="btn btn-sm" id="btnFilterRx" data-filter="rx">RX</button>
+              <button class="btn btn-sm btn-danger" id="btnClearConsole">Clear</button>
+            </div>
+          </div>
+          <div class="console-output" id="consoleOutput">
+            <span class="sys">[SYS] Serial console ready. Awaiting connection...</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════ BOTTOM ROW ═══════════════════════ -->
+    <div class="bottom-grid">
+
+      <!-- ── Calibration & Limits ── -->
+      <div class="card">
+        <div class="card-title"><span class="icon">📐</span> Servo Calibration &amp; Safety Limits</div>
+        <p style="font-size: 0.72rem; color: var(--text-muted); margin-bottom: var(--gap-md);">
+          Set min/max angle bounds per servo to prevent mechanical collisions. Values clamped server-side.
+        </p>
+        <div id="calibrationPanel">
+          <!-- Populated by admin.js -->
+        </div>
+        <div style="margin-top: var(--gap-md); display: flex; gap: var(--gap-sm);">
+          <button class="btn btn-primary" id="btnApplyCalibration">✅ Apply Limits</button>
+          <button class="btn" id="btnResetCalibration">↩ Reset to Defaults</button>
+        </div>
+      </div>
+
+      <!-- ── Command Log ── -->
+      <div class="card">
+        <div class="card-title"><span class="icon">📋</span> Command &amp; Event Log</div>
+        <div class="console-output" id="eventLog" style="max-height: 240px;">
+          <span class="sys">[SYS] Admin dashboard initialized</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="admin.js"></script>
+</body>
+</html>
