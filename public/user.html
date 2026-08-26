@@ -60,6 +60,16 @@
         height: 130px !important;
       }
     }
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.2; }
+    }
+
+    .btn-recording {
+      background: var(--accent-red) !important;
+      border-color: var(--accent-red) !important;
+      animation: blink 1s infinite;
+    }
   </style>
 </head>
 
@@ -139,13 +149,28 @@
 
       <!-- Controls row -->
       <div class="teach-controls">
-        <button class="btn btn-primary" id="btnRecord" title="Capture current joint angles as a frame">⏺ Record
-          Frame</button>
-        <button class="btn btn-success" id="btnPlay" title="Play recorded path once">▶ Play Path</button>
-        <button class="btn btn-success" id="btnLoop" title="Loop recorded path continuously">🔁 Loop Path</button>
-        <button class="btn btn-warning" id="btnPause" title="Pause playback">⏸ Pause</button>
+        <button class="btn btn-primary" id="btnRecord" title="Start/stop continuous recording">⏺ Record</button>
+        <button class="btn btn-success" id="btnPlayPause" title="Play / Pause">▶ Play</button>
+        <button class="btn btn-success" id="btnLoop" title="Loop recorded path continuously">🔁 Loop</button>
+        <button class="btn btn-warning" id="btnRestart" title="Restart playback from beginning">⏮ Restart</button>
         <button class="btn btn-danger" id="btnClear" title="Clear all recorded frames">🗑 Clear Memory</button>
         <span class="frame-count" id="frameCount">0 frames recorded</span>
+      </div>
+
+      <!-- Recording status indicator -->
+      <div id="recordingStatus" style="display:none; margin-bottom: var(--gap-md); padding: 8px 14px; border-radius: 8px; background: rgba(255,50,50,0.12); border: 1px solid var(--accent-red); color: var(--accent-red); font-family: var(--font-mono); font-size: 0.8rem; display: none; align-items: center; gap: 10px;">
+        <span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:var(--accent-red); animation: blink 1s infinite;"></span>
+        <span>REC</span>
+        <span id="recordingTimer">00:00</span>
+        <span>|</span>
+        <span id="recordingFrameCount">0 frames</span>
+      </div>
+
+      <!-- Sampling rate slider -->
+      <div class="speed-control" style="margin-bottom: var(--gap-sm);">
+        <span class="slider-label">Sampling Rate</span>
+        <input type="range" id="samplingRate" min="20" max="500" value="100" style="--fill: 16%">
+        <span class="slider-value" id="samplingRateValue">100ms</span>
       </div>
 
       <!-- Speed slider -->

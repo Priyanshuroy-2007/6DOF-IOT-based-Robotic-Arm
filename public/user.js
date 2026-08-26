@@ -263,6 +263,12 @@ function handleServerMessage(msg) {
       }
       break;
 
+    case 'kicked':
+      // Admin forcibly logged out this user — redirect to login
+      alert('⛔ You have been logged out by the Admin.');
+      window.location.href = '/login.html';
+      break;
+
     default:
       // Unknown message type — ignore silently
       break;
@@ -290,6 +296,12 @@ const DOM = {
   replaySpeedValue:document.getElementById('replaySpeedValue'),
   joystickLeftValues:  document.getElementById('joystickLeftValues'),
   joystickRightValues: document.getElementById('joystickRightValues'),
+  // Recording UI elements
+  recordingStatus:     document.getElementById('recordingStatus'),
+  recordingTimer:      document.getElementById('recordingTimer'),
+  recordingFrameCount: document.getElementById('recordingFrameCount'),
+  samplingRate:        document.getElementById('samplingRate'),
+  samplingRateValue:   document.getElementById('samplingRateValue'),
 };
 
 function updateConnectionUI(connected) {
@@ -790,27 +802,109 @@ let isLooping = false;            // Loop mode flag
 let playbackIndex = 0;            // Current playback position (like a DMA counter)
 let playbackTimer = null;         // setTimeout ID for frame stepping
 
-/**
- * Record current joint state as a frame.
- * Like writing current ADC readings to a memory buffer:
- *   buffer[writeIdx++] = currentSample;
- */
-function recordFrame() {
-  const frame = {
-    ...jointState,
-    timestamp: Date.now(),
-    index: recordedFrames.length,
-  };
-  recordedFrames.push(frame);
+// Continuous recording state
+let isRecording = false;          // Recording active flag
+let recordingInterval = null;     // setInterval ID for sampling
+let recordingTimerInterval = null;// setInterval ID for updating timer display
+let recordingStartTime = 0;       // Timestamp when recording began
+const MAX_RECORDING_MS = 2 * 60 * 1000; // 2 minutes max
 
-  // Also send RECORD command to server/MCU
+/**
+ * Toggle continuous recording on/off.
+ * When recording starts, a timer samples joint state at the configured rate.
+ * Auto-stops at 2 minutes.
+ */
+function toggleRecording() {
+  if (isRecording) {
+    stopRecording();
+  } else {
+    startRecording();
+  }
+}
+
+function startRecording() {
+  if (isPlaying) return; // Don't record while playing
+
+  isRecording = true;
+  recordingStartTime = Date.now();
+
+  const btnRecord = document.getElementById('btnRecord');
+  btnRecord.textContent = '⏹ Stop Recording';
+  btnRecord.classList.add('btn-recording');
+  btnRecord.classList.remove('btn-primary');
+
+  // Show recording status bar
+  DOM.recordingStatus.style.display = 'flex';
+  DOM.recordingTimer.textContent = '00:00';
+  DOM.recordingFrameCount.textContent = '0 frames';
+
+  // Notify server
   if (wsConnected) {
-    ws.send(JSON.stringify({ type: 'command', command: 'RECORD' }));
+    ws.send(JSON.stringify({ type: 'command', command: 'RECORD_START' }));
   }
 
-  updateFramesTable();
-  updateFrameCount();
-  console.log(`[TEACH] Recorded frame ${frame.index}:`, frame);
+  // Get sampling rate from slider
+  const sampleMs = parseInt(DOM.samplingRate.value) || 100;
+
+  // Sample joint state at configured rate
+  recordingInterval = setInterval(() => {
+    const elapsed = Date.now() - recordingStartTime;
+
+    // Auto-stop at 2 minutes
+    if (elapsed >= MAX_RECORDING_MS) {
+      stopRecording();
+      return;
+    }
+
+    const frame = {
+      ...jointState,
+      timestamp: Date.now(),
+      index: recordedFrames.length,
+    };
+    recordedFrames.push(frame);
+
+    // Update live frame count in status bar
+    DOM.recordingFrameCount.textContent = `${recordedFrames.length} frames`;
+
+    updateFramesTable();
+    updateFrameCount();
+  }, sampleMs);
+
+  // Update timer display every second
+  recordingTimerInterval = setInterval(() => {
+    const elapsed = Date.now() - recordingStartTime;
+    const totalSeconds = Math.floor(elapsed / 1000);
+    const mins = String(Math.floor(totalSeconds / 60)).padStart(2, '0');
+    const secs = String(totalSeconds % 60).padStart(2, '0');
+    DOM.recordingTimer.textContent = `${mins}:${secs}`;
+  }, 1000);
+
+  console.log(`[TEACH] Recording started (sampling every ${sampleMs}ms, max 2min)`);
+}
+
+function stopRecording() {
+  if (!isRecording) return;
+
+  isRecording = false;
+  clearInterval(recordingInterval);
+  clearInterval(recordingTimerInterval);
+  recordingInterval = null;
+  recordingTimerInterval = null;
+
+  const btnRecord = document.getElementById('btnRecord');
+  btnRecord.textContent = '⏺ Record';
+  btnRecord.classList.remove('btn-recording');
+  btnRecord.classList.add('btn-primary');
+
+  // Hide recording status bar
+  DOM.recordingStatus.style.display = 'none';
+
+  // Notify server
+  if (wsConnected) {
+    ws.send(JSON.stringify({ type: 'command', command: 'RECORD_STOP' }));
+  }
+
+  console.log(`[TEACH] Recording stopped. ${recordedFrames.length} total frames.`);
 }
 
 /**
@@ -825,9 +919,36 @@ function deleteFrame(index) {
 }
 
 /**
+ * Toggle between play and pause.
+ */
+function togglePlayPause() {
+  if (isPlaying) {
+    pausePlayback();
+  } else {
+    playPath();
+  }
+}
+
+/**
+ * Update the play/pause button appearance based on current state.
+ */
+function updatePlayPauseButton() {
+  const btn = document.getElementById('btnPlayPause');
+  if (!btn) return;
+  if (isPlaying) {
+    btn.textContent = '⏸ Pause';
+    btn.classList.remove('btn-success');
+    btn.classList.add('btn-warning');
+  } else {
+    btn.textContent = '▶ Play';
+    btn.classList.remove('btn-warning');
+    btn.classList.add('btn-success');
+  }
+}
+
+/**
  * Play recorded path once.
- * Steps through frames with configurable delay (interpolation period).
- * Like a DMA transfer in normal mode (runs once, then stops).
+ * Resumes from the current playbackIndex (supports pause/resume).
  */
 function playPath() {
   if (recordedFrames.length === 0) return;
@@ -835,13 +956,16 @@ function playPath() {
 
   isPlaying = true;
   isLooping = false;
-  playbackIndex = 0;
 
-  // Notify server
+  if (playbackIndex >= recordedFrames.length) {
+    playbackIndex = 0;
+  }
+
   if (wsConnected) {
     ws.send(JSON.stringify({ type: 'command', command: 'PLAY' }));
   }
 
+  updatePlayPauseButton();
   stepPlayback();
 }
 
@@ -855,12 +979,16 @@ function loopPath() {
 
   isPlaying = true;
   isLooping = true;
-  playbackIndex = 0;
+
+  if (playbackIndex >= recordedFrames.length) {
+    playbackIndex = 0;
+  }
 
   if (wsConnected) {
     ws.send(JSON.stringify({ type: 'command', command: 'LOOP' }));
   }
 
+  updatePlayPauseButton();
   stepPlayback();
 }
 
@@ -915,6 +1043,8 @@ function pausePlayback() {
   if (wsConnected) {
     ws.send(JSON.stringify({ type: 'command', command: 'PAUSE' }));
   }
+
+  updatePlayPauseButton();
 }
 
 /**
@@ -932,6 +1062,32 @@ function stopPlayback() {
   }
 
   clearFrameHighlights();
+  updatePlayPauseButton();
+}
+
+/**
+ * Restart playback from the very beginning.
+ * Stops current playback, resets index to 0, then starts playing.
+ */
+function restartPlayback() {
+  if (recordedFrames.length === 0) return;
+
+  // Stop whatever is happening
+  isPlaying = false;
+  clearTimeout(playbackTimer);
+  clearFrameHighlights();
+  playbackIndex = 0;
+
+  // Now start fresh
+  isPlaying = true;
+  // Keep current loop mode
+
+  if (wsConnected) {
+    ws.send(JSON.stringify({ type: 'command', command: 'RESTART' }));
+  }
+
+  updatePlayPauseButton();
+  stepPlayback();
 }
 
 /**
@@ -940,6 +1096,7 @@ function stopPlayback() {
  */
 function clearFrames() {
   stopPlayback();
+  if (isRecording) stopRecording();
   recordedFrames = [];
   updateFramesTable();
   updateFrameCount();
@@ -1021,11 +1178,18 @@ function clearFrameHighlights() {
   );
 
   // 3. Bind teach & replay buttons (like GPIO EXTI interrupt callbacks)
-  document.getElementById('btnRecord').addEventListener('click', recordFrame);
-  document.getElementById('btnPlay').addEventListener('click', playPath);
+  document.getElementById('btnRecord').addEventListener('click', toggleRecording);
+  document.getElementById('btnPlayPause').addEventListener('click', togglePlayPause);
   document.getElementById('btnLoop').addEventListener('click', loopPath);
-  document.getElementById('btnPause').addEventListener('click', pausePlayback);
+  document.getElementById('btnRestart').addEventListener('click', restartPlayback);
   document.getElementById('btnClear').addEventListener('click', clearFrames);
+
+  // 4. Sampling rate slider
+  DOM.samplingRate.addEventListener('input', () => {
+    const val = DOM.samplingRate.value;
+    DOM.samplingRateValue.textContent = `${val}ms`;
+    DOM.samplingRate.style.setProperty('--fill', `${((val - 20) / 480) * 100}%`);
+  });
 
   // 4. Replay speed slider
   DOM.replaySpeed.addEventListener('input', () => {

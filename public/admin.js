@@ -742,6 +742,7 @@ function updateClientList(clientsList) {
       } else {
         actionBtn = `<button class="btn btn-sm btn-primary" onclick="setDriver('${client.id}')">Grant Control</button>`;
       }
+      actionBtn += ` <button class="btn btn-sm btn-danger" onclick="kickClient('${client.id}')" title="Logout this user">⏻ Logout</button>`;
     }
 
     item.innerHTML = `
@@ -750,7 +751,7 @@ function updateClientList(clientsList) {
         <span class="badge ${roleBadgeClass}">${client.role}</span>
         ${activeDriverId === client.id ? '<span class="badge badge-green">DRIVER</span>' : ''}
       </div>
-      <div>${actionBtn}</div>
+      <div style="display:flex; gap:4px;">${actionBtn}</div>
     `;
     DOM.clientList.appendChild(item);
   }
@@ -759,6 +760,13 @@ function updateClientList(clientsList) {
 window.setDriver = function(clientId) {
   if (wsConnected) {
     ws.send(JSON.stringify({ type: 'assign_driver', clientId: clientId }));
+  }
+};
+
+window.kickClient = function(clientId) {
+  if (wsConnected) {
+    ws.send(JSON.stringify({ type: 'kick_client', clientId: clientId }));
+    logEvent(`Logged out client ${clientId}`, 'warn');
   }
 };
 

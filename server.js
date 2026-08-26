@@ -410,6 +410,33 @@ function routeMessage(ws, clientInfo, msg) {
       broadcastToAll({ type: 'driver_assigned', driverId: activeDriverId });
       break;
 
+    /* ---- Kick (disconnect) a client (admin only) ---- */
+    case 'kick_client': {
+      if (clientInfo.role !== 'admin') return;
+      const targetId = msg.clientId;
+      let kicked = false;
+      for (const [clientWs, info] of clients.entries()) {
+        if (info.id === targetId) {
+          console.log(`[ADMIN] Logging out client ${info.id} (${info.username || info.role}) — by ${clientInfo.id}`);
+          if (activeDriverId === info.id) {
+            activeDriverId = null;
+            broadcastToAll({ type: 'driver_assigned', driverId: null });
+          }
+          try {
+            clientWs.send(JSON.stringify({ type: 'kicked', reason: 'You have been logged out by the Admin.' }));
+          } catch(e) {}
+          // Small delay so message is sent before closing
+          setTimeout(() => clientWs.close(1000, 'Logged out by admin'), 200);
+          kicked = true;
+          break;
+        }
+      }
+      if (!kicked) {
+        console.warn(`[ADMIN] Logout failed — client ${targetId} not found`);
+      }
+      break;
+    }
+
     /* ---- Serial port configuration (admin only) ---- */
     case 'serial_config':
       if (clientInfo.role !== 'admin') return;
