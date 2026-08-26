@@ -49,7 +49,7 @@ function connect() {
       
       // Redirect to user interface
       setTimeout(() => {
-        window.location.href = `/user.html?token=${msg.token}`;
+        window.location.href = `/user.html`;
       }, 500);
     } 
     else if (msg.type === 'auth_fail') {

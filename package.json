@@ -9,9 +9,16 @@
   },
   "dependencies": {
     "express": "^4.21.0",
-    "ws": "^8.18.0",
-    "serialport": "^12.0.0"
+    "helmet": "^8.3.0",
+    "serialport": "^12.0.0",
+    "ws": "^8.18.0"
   },
-  "keywords": ["robotics", "stm32", "websocket", "serial", "real-time"],
+  "keywords": [
+    "robotics",
+    "stm32",
+    "websocket",
+    "serial",
+    "real-time"
+  ],
   "license": "MIT"
 }

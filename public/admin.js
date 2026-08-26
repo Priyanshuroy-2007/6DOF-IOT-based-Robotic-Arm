@@ -34,7 +34,7 @@
  *
  * We extract it from the URL query params (?token=xxx) or use the default.
  */
-const ADMIN_TOKEN = new URLSearchParams(window.location.search).get('token') || 'roboarm2026';
+const ADMIN_TOKEN = new URLSearchParams(window.location.search).get('token');
 
 /**
  * Joint configuration table — same as user.js for consistency.

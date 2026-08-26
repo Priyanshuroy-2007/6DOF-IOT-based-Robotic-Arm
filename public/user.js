@@ -149,6 +149,11 @@ function connect() {
     wsConnected = false;
     updateConnectionUI(false);
     clearInterval(heartbeatInterval);
+
+    // Safety: Disable physical replay control if disconnected
+    if (typeof stopPlayback === 'function') stopPlayback();
+    if (typeof isRecording !== 'undefined' && isRecording && typeof stopRecording === 'function') stopRecording();
+
     scheduleReconnect();
   };
 
