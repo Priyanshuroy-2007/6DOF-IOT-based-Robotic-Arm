@@ -138,6 +138,13 @@ DOM.btnCancel.addEventListener('click', () => {
   DOM.statusMsg.className = 'status-msg';
 });
 
+// Clean up connection on unload to prevent ghost sessions
+window.addEventListener('beforeunload', () => {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.close(1000, 'Page unloaded');
+  }
+});
+
 // Boot
 (function init() {
   // If they already have a token, they can just go straight to user.html

@@ -1322,6 +1322,13 @@ function escapeHtml(text) {
 
   // 3. Connect WebSocket (admin-privileged)
   connect();
+  
+  // Clean up connection on unload to prevent ghost sessions
+  window.addEventListener('beforeunload', () => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.close(1000, 'Page unloaded');
+    }
+  });
 
   console.log('[BOOT] Admin Dashboard init complete.');
 })();

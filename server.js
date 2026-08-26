@@ -274,6 +274,13 @@ wss.on('connection', (ws, req) => {
       return;
     }
     session.lastSeen = now;
+    
+    for (const [existingWs, info] of clients.entries()) {
+      if (info.role === 'user' && info.token === token && existingWs !== ws) {
+        console.log(`[WS] Replaced older user session for ${info.username}`);
+        try { existingWs.close(4001, 'Replaced by new connection'); } catch (e) {}
+      }
+    }
   }
 
   const clientInfo = {

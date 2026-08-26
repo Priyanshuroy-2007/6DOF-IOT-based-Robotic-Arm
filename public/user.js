@@ -1302,6 +1302,13 @@ function clearFrameHighlights() {
 
   // Poll keyboard state at 50Hz
   setInterval(processKeyboardInput, 20);
+  
+  // Clean up connection on unload to prevent ghost sessions
+  window.addEventListener('beforeunload', () => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.close(1000, 'Page unloaded');
+    }
+  });
 
   console.log('[BOOT] Init complete — all subsystems online.');
 })();
