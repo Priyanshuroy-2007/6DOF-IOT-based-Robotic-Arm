@@ -271,7 +271,7 @@ MIT License — free to use, modify and distribute.
 
 ---
 
-## 🙏 Acknowledgements
+## Acknowledgements
 
 - [STMicroelectronics HAL Library](https://github.com/STMicroelectronics)
 - [ws — WebSocket library for Node.js](https://github.com/websockets/ws)
