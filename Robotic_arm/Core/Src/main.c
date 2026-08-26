@@ -47,7 +47,8 @@ uint16_t rxIndex = 0;
 uint8_t packetReady = 0;
 
 // Joint angles (0-180)
-uint16_t jointAngles[6] = {90, 90, 90, 90, 90, 90};
+int16_t jointAngles[6] = {90, 90, 90, 90, 90, 90};
+uint32_t last_packet_time = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -59,7 +60,7 @@ static void MX_USART1_UART_Init(void);
 /* USER CODE BEGIN PFP */
 void Process_Packet(void);
 void Set_Servo_Angles(void);
-uint32_t Angle_To_Pulse(uint16_t angle);
+uint32_t Angle_To_Pulse(int16_t angle);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -86,9 +87,9 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
 }
 
 // Convert angle (0-180) to PWM pulse width (microseconds)
-uint32_t Angle_To_Pulse(uint16_t angle) {
-  if (angle > 180)
-    angle = 180;
+uint32_t Angle_To_Pulse(int16_t angle) {
+  if (angle < 0) angle = 0;
+  if (angle > 180) angle = 180;
   return SERVO_MIN_PULSE + ((SERVO_MAX_PULSE - SERVO_MIN_PULSE) * angle) / 180;
 }
 
@@ -108,21 +109,34 @@ void Set_Servo_Angles(void) {
                         Angle_To_Pulse(jointAngles[5])); // J6
 }
 
-// Parse the packet like <J1:90,J2:180,J3:0,J4:45,J5:90,J6:90>
+// Parse the packet like <J1:90,J2:180,J3:0,J4:45,J5:90,J6:90*CHECKSUM>
 void Process_Packet(void) {
-  if (rxBuffer[0] == '<' && strchr((char *)rxBuffer, '>')) {
-    char *ptr = (char *)rxBuffer;
+  char *start = strchr((char *)rxBuffer, '<');
+  char *end = strchr((char *)rxBuffer, '>');
+  char *star = strchr((char *)rxBuffer, '*');
 
-    for (int i = 0; i < 6; i++) {
-      char searchStr[5];
-      sprintf(searchStr, "J%d:", i + 1);
-      char *found = strstr(ptr, searchStr);
-      if (found) {
-        jointAngles[i] = atoi(found + 3);
-      }
+  if (start && end && star && star > start && end > star) {
+    // Validate checksum
+    uint8_t calc_checksum = 0;
+    for (char *p = start + 1; p < star; p++) {
+      calc_checksum ^= *p;
     }
+    
+    uint8_t recv_checksum = (uint8_t)strtol(star + 1, NULL, 16);
 
-    Set_Servo_Angles();
+    if (calc_checksum == recv_checksum) {
+      char *ptr = start + 1;
+      for (int i = 0; i < 6; i++) {
+        char searchStr[5];
+        sprintf(searchStr, "J%d:", i + 1);
+        char *found = strstr(ptr, searchStr);
+        if (found && found < star) {
+          jointAngles[i] = atoi(found + 3);
+        }
+      }
+      Set_Servo_Angles();
+      last_packet_time = HAL_GetTick();
+    }
   }
 
   // Reset buffer for next packet
@@ -185,9 +199,20 @@ int main(void) {
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+  last_packet_time = HAL_GetTick();
   while (1) {
     if (packetReady) {
       Process_Packet();
+    }
+    
+    // Watchdog: If no valid packet received in 1000ms, go to neutral safe state
+    if (HAL_GetTick() - last_packet_time > 1000) {
+      for(int i = 0; i < 6; i++) {
+        jointAngles[i] = 90;
+      }
+      Set_Servo_Angles();
+      // Keep last_packet_time at current so we don't continuously spam PWM registers
+      last_packet_time = HAL_GetTick();
     }
     /* USER CODE END WHILE */
 

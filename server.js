@@ -29,6 +29,7 @@ const express = require('express');
 const http = require('http');
 const { WebSocketServer } = require('ws');
 const path = require('path');
+const crypto = require('crypto');
 
 /* ---------------------------------------------------------------------------
  *  Attempt to load serialport. If not installed or on a system without
@@ -69,6 +70,14 @@ const CONFIG = {
   // Console log buffer size (circular buffer depth)
   MAX_LOG_LINES: 500,
 };
+
+if (CONFIG.ADMIN_TOKEN === 'roboarm2026') {
+  console.warn('\n================================================================');
+  console.warn(' ⚠️ WARNING: USING DEFAULT ADMIN TOKEN (roboarm2026) ⚠️');
+  console.warn(' This is a severe security risk! Anyone can trigger E-STOP or');
+  console.warn(' take control. Please set the ADMIN_TOKEN environment variable.');
+  console.warn('================================================================\n');
+}
 
 /* ===========================================================================
  *  SERVER STATE (analogous to global volatile variables in C)
@@ -194,6 +203,7 @@ wss.on('connection', (ws, req) => {
   const clientInfo = {
     id: generateClientId(),
     role: role,
+    token: role === 'user' ? token : null,
     username: role === 'user' ? validUserTokens.get(token) : (role === 'admin' ? 'Admin' : 'Guest'),
     lastHeartbeat: Date.now(),
     connectedAt: Date.now(),
@@ -292,7 +302,7 @@ function routeMessage(ws, clientInfo, msg) {
         const username = msg.username;
         if (!username) return;
         const code = Math.floor(1000 + Math.random() * 9000).toString(); // 4 digits
-        activeAuthRequests.set(username, { code, expiresAt: Date.now() + 10 * 60 * 1000 });
+        activeAuthRequests.set(username, { code, expiresAt: Date.now() + 10 * 60 * 1000, attempts: 0 });
         
         console.log(`[AUTH] Request from ${username}, code: ${code}`);
         // Broadcast to admins to display in the dashboard
@@ -303,12 +313,22 @@ function routeMessage(ws, clientInfo, msg) {
     case 'submit_code':
       if (clientInfo.role === 'login') {
         const req = activeAuthRequests.get(msg.username);
-        if (req && req.code === msg.code && Date.now() < req.expiresAt) {
-          activeAuthRequests.delete(msg.username);
-          const sessionToken = 'usr_' + Math.random().toString(36).substr(2, 12);
-          validUserTokens.set(sessionToken, msg.username);
-          ws.send(JSON.stringify({ type: 'auth_success', token: sessionToken }));
-          console.log(`[AUTH] User ${msg.username} authenticated successfully.`);
+        if (req && Date.now() < req.expiresAt) {
+          req.attempts = (req.attempts || 0) + 1;
+          if (req.attempts > 3) {
+            activeAuthRequests.delete(msg.username);
+            ws.send(JSON.stringify({ type: 'auth_fail', message: 'Too many attempts. Request a new code.' }));
+            return;
+          }
+          if (req.code === msg.code) {
+            activeAuthRequests.delete(msg.username);
+            const sessionToken = 'usr_' + crypto.randomBytes(16).toString('hex');
+            validUserTokens.set(sessionToken, msg.username);
+            ws.send(JSON.stringify({ type: 'auth_success', token: sessionToken }));
+            console.log(`[AUTH] User ${msg.username} authenticated successfully.`);
+          } else {
+            ws.send(JSON.stringify({ type: 'auth_fail', message: `Invalid code. Attempts left: ${3 - req.attempts}` }));
+          }
         } else {
           ws.send(JSON.stringify({ type: 'auth_fail', message: 'Invalid or expired code.' }));
         }
@@ -316,21 +336,25 @@ function routeMessage(ws, clientInfo, msg) {
       break;
 
     /* ---- Joint state update from user ---- */
-    case 'joints':
-      if (clientInfo.role === 'user') {
+    case 'joints': {
+      // 1) Universal safety latch
+      if (eStopActive) {
+        ws.send(JSON.stringify({ type: 'estop_active', message: 'E-STOP engaged' }));
+        return;
+      }
+
+      // 2) Role-based auth and rate-limiting
+      if (clientInfo.role === 'admin') {
+        // Admins bypass driver lock unconditionally
+      } else if (clientInfo.role === 'user') {
         // Only active driver can send joints
         if (activeDriverId !== clientInfo.id) {
-          return; // Silently drop (handled client-side mostly)
+          return; // Silently drop
         }
         
         // Check if user input is locked by admin
         if (userInputLocked) {
           ws.send(JSON.stringify({ type: 'locked', message: 'Admin has locked user input' }));
-          return;
-        }
-        // Check E-STOP
-        if (eStopActive) {
-          ws.send(JSON.stringify({ type: 'estop_active', message: 'E-STOP engaged' }));
           return;
         }
 
@@ -340,6 +364,9 @@ function routeMessage(ws, clientInfo, msg) {
           return; // Drop packet (rate limited)
         }
         clientInfo.lastSendTime = now;
+      } else {
+        // Unauthenticated or 'login' roles are rejected
+        return;
       }
 
       // Clamp values to calibration limits (like PWM compare register bounds)
@@ -359,6 +386,7 @@ function routeMessage(ws, clientInfo, msg) {
         raw: packet,
       });
       break;
+    }
 
     /* ---- Command messages ---- */
     case 'command':
@@ -418,6 +446,12 @@ function routeMessage(ws, clientInfo, msg) {
       for (const [clientWs, info] of clients.entries()) {
         if (info.id === targetId) {
           console.log(`[ADMIN] Logging out client ${info.id} (${info.username || info.role}) — by ${clientInfo.id}`);
+          
+          // Cleanup valid token so they can't reconnect
+          if (info.token) {
+            validUserTokens.delete(info.token);
+          }
+
           if (activeDriverId === info.id) {
             activeDriverId = null;
             broadcastToAll({ type: 'driver_assigned', driverId: null });
@@ -464,6 +498,16 @@ function routeMessage(ws, clientInfo, msg) {
  *  COMMAND HANDLER
  * ========================================================================= */
 function handleCommand(ws, clientInfo, msg) {
+  // Global auth check for commands
+  if (eStopActive) return;
+  if (clientInfo.role === 'admin') {
+    // allow
+  } else if (clientInfo.role === 'user') {
+    if (activeDriverId !== clientInfo.id || userInputLocked) return;
+  } else {
+    return; // reject unauthenticated/login roles
+  }
+
   const cmd = msg.command;
   let serialCmd = '';
 
@@ -688,7 +732,12 @@ function sendToSerial(data) {
  *  4. Apply values to PWM output compare registers
  */
 function formatJointPacket(joints) {
-  return `<J1:${joints.J1},J2:${joints.J2},J3:${joints.J3},J4:${joints.J4},J5:${joints.J5},J6:${joints.J6}>\n`;
+  const inner = `J1:${joints.J1},J2:${joints.J2},J3:${joints.J3},J4:${joints.J4},J5:${joints.J5},J6:${joints.J6}`;
+  let checksum = 0;
+  for (let i = 0; i < inner.length; i++) {
+    checksum ^= inner.charCodeAt(i);
+  }
+  return `<${inner}*${checksum.toString(16).toUpperCase().padStart(2, '0')}>\n`;
 }
 
 /**
