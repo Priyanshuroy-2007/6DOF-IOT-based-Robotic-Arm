@@ -66,6 +66,25 @@ let consoleLinesCount = 0;        // Current console line count
 let activeDriverId = null;        // Track the single driver
 let lastKnownClients = null;
 
+const adminJointState = {
+  J1: 90, J2: 90, J3: 90, J4: 90, J5: 90, J6: 90,
+};
+let lastSendTime = 0;
+const THROTTLE_MS = 20;
+
+function sendAdminJointState() {
+  if (!wsConnected || !userInputLocked) return;
+
+  const now = Date.now();
+  if (now - lastSendTime < THROTTLE_MS) return;
+  lastSendTime = now;
+
+  ws.send(JSON.stringify({
+    type: 'joints',
+    data: { ...adminJointState },
+  }));
+}
+
 /* ===========================================================================
  *  DOM REFERENCES (register pointers)
  * ========================================================================= */
@@ -211,11 +230,14 @@ function handleServerMessage(msg) {
       activeDriverId = msg.activeDriverId || null;
 
       updateEstopUI();
-      DOM.toggleLockUsers.checked = userInputLocked;
+      updateTakeoverUI();
       updateSerialStatusUI(serialConnected);
 
       if (msg.servoLimits) populateCalibration(msg.servoLimits);
-      if (msg.jointState) updateJointReadout(msg.jointState);
+      if (msg.jointState) {
+        Object.assign(adminJointState, msg.jointState);
+        updateJointReadout(msg.jointState);
+      }
 
       logEvent('sys', `Init complete — E-STOP: ${eStopEngaged}, Lock: ${userInputLocked}, Serial: ${serialConnected}`);
       break;
@@ -245,6 +267,7 @@ function handleServerMessage(msg) {
 
     /* ── Joint state update (from user or admin) ── */
     case 'joint_update':
+      Object.assign(adminJointState, msg.data);
       updateJointReadout(msg.data);
       break;
 
@@ -286,7 +309,7 @@ function handleServerMessage(msg) {
     /* ── User lock state broadcast ── */
     case 'lock_state':
       userInputLocked = msg.locked;
-      DOM.toggleLockUsers.checked = msg.locked;
+      updateTakeoverUI();
       logEvent('sys', `User input ${msg.locked ? 'LOCKED' : 'UNLOCKED'} by ${msg.by}`);
       break;
 
@@ -376,12 +399,12 @@ DOM.btnEstop.addEventListener('mousedown', (e) => {
   if (!eStopEngaged) return; // Only applies when trying to release
 
   estopReleaseProgress = 0;
-  DOM.estopHint.textContent = 'Hold for 2s to RELEASE...';
+  DOM.btnEstop.innerHTML = '<span style="font-size: 1.4rem;">🔴</span>HOLD...<br><span style="font-size:0.55rem;">0%</span>';
 
   estopReleaseTimer = setInterval(() => {
     estopReleaseProgress += 100;
     const pct = Math.min((estopReleaseProgress / 2000) * 100, 100);
-    DOM.estopHint.textContent = `Releasing... ${Math.round(pct)}%`;
+    DOM.btnEstop.innerHTML = `<span style="font-size: 1.4rem;">🔴</span>HOLD...<br><span style="font-size:0.55rem;">${Math.round(pct)}%</span>`;
 
     if (estopReleaseProgress >= 2000) {
       clearInterval(estopReleaseTimer);
@@ -403,7 +426,7 @@ function cancelEstopRelease() {
     estopReleaseTimer = null;
     estopReleaseProgress = 0;
     if (eStopEngaged) {
-      DOM.estopHint.textContent = 'Hold button for 2s to RELEASE E-STOP.';
+      DOM.btnEstop.innerHTML = '<span style="font-size: 1.4rem;">🔴</span>ENGAGED<br><span style="font-size:0.55rem;opacity:0.7;">hold to release</span>';
     }
   }
 }
@@ -412,24 +435,39 @@ function updateEstopUI() {
   DOM.btnEstop.classList.toggle('engaged', eStopEngaged);
 
   if (eStopEngaged) {
-    DOM.btnEstop.innerHTML = '<span style="font-size: 1.8rem;">🔴</span>ENGAGED';
-    DOM.estopHint.textContent = 'Hold button for 2s to RELEASE E-STOP.';
+    DOM.btnEstop.innerHTML = '<span style="font-size: 1.4rem;">🔴</span>ENGAGED<br><span style="font-size:0.55rem;opacity:0.7;">hold to release</span>';
   } else {
-    DOM.btnEstop.innerHTML = '<span style="font-size: 1.8rem;">⛔</span>E-STOP';
-    DOM.estopHint.textContent = 'Click to ENGAGE emergency stop. All motors halt immediately.';
+    DOM.btnEstop.innerHTML = '<span style="font-size: 1.4rem;">⛔</span>E-STOP';
   }
 }
 
 /* ===========================================================================
- *  USER LOCK TOGGLE
+ *  USER LOCK / TAKEOVER (Dynamic Button)
  * ========================================================================= */
-DOM.toggleLockUsers.addEventListener('change', () => {
-  userInputLocked = DOM.toggleLockUsers.checked;
+DOM.toggleLockUsers.addEventListener('click', () => {
+  userInputLocked = !userInputLocked;
+  updateTakeoverUI();
+
   if (wsConnected) {
     ws.send(JSON.stringify({ type: 'lock_users', locked: userInputLocked }));
   }
-  logEvent('sys', `User input ${userInputLocked ? 'LOCKED' : 'UNLOCKED'}`);
+  logEvent('sys', `User input ${userInputLocked ? 'LOCKED — TAKEOVER ACTIVE' : 'UNLOCKED'}`);
 });
+
+function updateTakeoverUI() {
+  const btn = DOM.toggleLockUsers;
+  const speedCtrl = document.getElementById('adminKeyboardSpeedControl');
+
+  if (userInputLocked) {
+    btn.classList.add('engaged');
+    btn.innerHTML = '<span style="font-size: 2.2rem;">⚡</span>RELEASE';
+    if (speedCtrl) speedCtrl.style.display = 'block';
+  } else {
+    btn.classList.remove('engaged');
+    btn.innerHTML = '<span style="font-size: 2.2rem;">⚡</span>TAKE<br>OVER';
+    if (speedCtrl) speedCtrl.style.display = 'none';
+  }
+}
 
 /* ===========================================================================
  *  SERIAL BRIDGE MANAGER
@@ -647,75 +685,286 @@ function updateJointReadout(joints) {
     DOM.jointReadout.appendChild(card);
   }
 
-  // Also update the read‑only joystick preview
+  // Also update the joystick preview (only if not interactive, otherwise the user's local drag handles it)
   if (DOM.previewLeft && DOM.previewRight) {
-    drawUserPreview(joints);
+    if (adminJoystickLeft && !adminJoystickLeft.active) {
+      adminJoystickLeft.syncKnobFromState();
+    }
+    if (adminJoystickRight && !adminJoystickRight.active) {
+      adminJoystickRight.syncKnobFromState();
+    }
   }
 }
 
 // ---------------------------------------------------
-// User‑input visual preview (read‑only joysticks)
+// User Input Preview / Admin Joysticks
 // ---------------------------------------------------
-function drawJoystick(canvas, xAngle, yAngle) {
-  const ctx = canvas.getContext('2d');
-  const size = canvas.width; // assume square
-  const center = size / 2;
-  const outerRadius = center - 10;
-  const knobRadius = 24;
 
-  // Helper to map angle (0‑180) -> normalized -1..+1 -> position
-  const norm = (angle) => (angle - 90) / 90; // 0°=>-1, 90°=>0, 180°=>+1
-  const knobX = center + norm(xAngle) * outerRadius;
-  const knobY = center + norm(yAngle) * outerRadius;
+class AdminJoystick {
+  constructor(canvasId, xJointKey, yJointKey) {
+    this.canvas = document.getElementById(canvasId);
+    this.ctx = this.canvas.getContext('2d');
+    this.xKey = xJointKey;
+    this.yKey = yJointKey;
 
-  // Clear canvas
-  ctx.clearRect(0, 0, size, size);
+    this.size = this.canvas.width;
+    this.center = this.size / 2;
+    this.outerRadius = this.size / 2 - 10;
+    this.knobRadius = 24;
+    this.deadZone = 5;
 
-  // Outer ring
-  ctx.beginPath();
-  ctx.arc(center, center, outerRadius, 0, Math.PI * 2);
-  ctx.strokeStyle = 'rgba(0,229,255,0.15)';
-  ctx.lineWidth = 2;
-  ctx.stroke();
+    this.knobX = this.center;
+    this.knobY = this.center;
+    this.active = false;
+    this.pointerId = null;
 
-  // Crosshair
-  ctx.beginPath();
-  ctx.moveTo(center, center - outerRadius);
-  ctx.lineTo(center, center + outerRadius);
-  ctx.moveTo(center - outerRadius, center);
-  ctx.lineTo(center + outerRadius, center);
-  ctx.strokeStyle = 'rgba(0,229,255,0.07)';
-  ctx.lineWidth = 1;
-  ctx.stroke();
+    this.trail = [];
+    this.maxTrailLength = 12;
 
-  // Knob shadow
-  ctx.beginPath();
-  ctx.arc(knobX, knobY, knobRadius + 4, 0, Math.PI * 2);
-  ctx.fillStyle = 'rgba(0,229,255,0.1)';
-  ctx.fill();
+    this.canvas.addEventListener('pointerdown', (e) => this.onPointerDown(e));
+    this.canvas.addEventListener('pointermove', (e) => this.onPointerMove(e));
+    this.canvas.addEventListener('pointerup', (e) => this.onPointerUp(e));
+    this.canvas.addEventListener('pointercancel', (e) => this.onPointerUp(e));
+    this.canvas.addEventListener('pointerleave', (e) => this.onPointerUp(e));
 
-  // Knob
-  const grad = ctx.createRadialGradient(knobX - 4, knobY - 4, 2, knobX, knobY, knobRadius);
-  grad.addColorStop(0, 'rgba(0,229,255,0.9)');
-  grad.addColorStop(0.6, 'rgba(0,229,255,0.5)');
-  grad.addColorStop(1, 'rgba(0,229,255,0.15)');
-  ctx.beginPath();
-  ctx.arc(knobX, knobY, knobRadius, 0, Math.PI * 2);
-  ctx.fillStyle = grad;
-  ctx.fill();
+    this.render();
+  }
 
-  // Border
-  ctx.strokeStyle = 'rgba(0,229,255,0.4)';
-  ctx.lineWidth = 2;
-  ctx.stroke();
+  onPointerDown(e) {
+    if (!userInputLocked) return; // Only interactive when lock is active
+    e.preventDefault();
+    this.canvas.setPointerCapture(e.pointerId);
+    this.active = true;
+    this.pointerId = e.pointerId;
+    this.updateKnobPosition(e);
+  }
+
+  onPointerMove(e) {
+    if (!this.active || e.pointerId !== this.pointerId) return;
+    e.preventDefault();
+    this.updateKnobPosition(e);
+  }
+
+  onPointerUp(e) {
+    if (e.pointerId !== this.pointerId) return;
+    this.active = false;
+    this.pointerId = null;
+    this.trail = [];
+    this.springBack();
+  }
+
+  updateKnobPosition(e) {
+    const rect = this.canvas.getBoundingClientRect();
+    const scaleX = this.size / rect.width;
+    const scaleY = this.size / rect.height;
+
+    let x = (e.clientX - rect.left) * scaleX;
+    let y = (e.clientY - rect.top) * scaleY;
+
+    const dx = x - this.center;
+    const dy = y - this.center;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    if (dist > this.outerRadius) {
+      const angle = Math.atan2(dy, dx);
+      x = this.center + Math.cos(angle) * this.outerRadius;
+      y = this.center + Math.sin(angle) * this.outerRadius;
+    }
+
+    this.knobX = x;
+    this.knobY = y;
+
+    this.trail.push({ x, y });
+    if (this.trail.length > this.maxTrailLength) {
+      this.trail.shift();
+    }
+
+    this.updateJointState();
+    this.render();
+  }
+
+  updateJointState() {
+    const normalizedX = (this.knobX - this.center) / this.outerRadius;
+    const normalizedY = (this.knobY - this.center) / this.outerRadius;
+
+    const applyDeadZone = (val) => {
+      if (Math.abs(val) < this.deadZone / this.outerRadius) return 0;
+      return val;
+    };
+
+    const dx = applyDeadZone(normalizedX);
+    const dy = applyDeadZone(normalizedY);
+
+    const xAngle = Math.round((dx + 1.0) * 90);
+    const yAngle = Math.round((dy + 1.0) * 90);
+
+    adminJointState[this.xKey] = Math.max(0, Math.min(180, xAngle));
+    adminJointState[this.yKey] = Math.max(0, Math.min(180, yAngle));
+
+    sendAdminJointState();
+  }
+
+  syncKnobFromState() {
+    if (this.active) return;
+    
+    // Safety check - use neutral if state is undefined
+    const jx = adminJointState[this.xKey] ?? 90;
+    const jy = adminJointState[this.yKey] ?? 90;
+
+    const normalizedX = (jx / 90) - 1.0;
+    const normalizedY = (jy / 90) - 1.0;
+
+    this.knobX = this.center + (normalizedX * this.outerRadius);
+    this.knobY = this.center + (normalizedY * this.outerRadius);
+
+    this.render();
+  }
+
+  springBack() {
+    const animate = () => {
+      if (this.active) return;
+
+      const dx = this.center - this.knobX;
+      const dy = this.center - this.knobY;
+
+      if (Math.abs(dx) < 1 && Math.abs(dy) < 1) {
+        this.knobX = this.center;
+        this.knobY = this.center;
+        this.updateJointState();
+        this.render();
+        return;
+      }
+
+      this.knobX += dx * 0.2;
+      this.knobY += dy * 0.2;
+
+      this.updateJointState();
+      this.render();
+      requestAnimationFrame(animate);
+    };
+    requestAnimationFrame(animate);
+  }
+
+  render() {
+    const ctx = this.ctx;
+    const c = this.center;
+    const r = this.outerRadius;
+
+    ctx.clearRect(0, 0, this.size, this.size);
+
+    ctx.beginPath();
+    ctx.arc(c, c, r, 0, Math.PI * 2);
+    ctx.strokeStyle = this.active ? 'rgba(0, 229, 255, 0.5)' : 'rgba(0, 229, 255, 0.15)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(c, c - r);
+    ctx.lineTo(c, c + r);
+    ctx.moveTo(c - r, c);
+    ctx.lineTo(c + r, c);
+    ctx.strokeStyle = 'rgba(0, 229, 255, 0.07)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    if (this.trail.length > 1) {
+      for (let i = 1; i < this.trail.length; i++) {
+        const alpha = (i / this.trail.length) * 0.4;
+        const size = (i / this.trail.length) * 4;
+        ctx.beginPath();
+        ctx.arc(this.trail[i].x, this.trail[i].y, size, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(0, 229, 255, ${alpha})`;
+        ctx.fill();
+      }
+    }
+
+    ctx.beginPath();
+    ctx.arc(this.knobX, this.knobY, this.knobRadius + 4, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(0, 229, 255, 0.1)';
+    ctx.fill();
+
+    const gradient = ctx.createRadialGradient(
+      this.knobX - 4, this.knobY - 4, 2,
+      this.knobX, this.knobY, this.knobRadius
+    );
+    gradient.addColorStop(0, 'rgba(0, 229, 255, 0.9)');
+    gradient.addColorStop(0.6, 'rgba(0, 229, 255, 0.5)');
+    gradient.addColorStop(1, 'rgba(0, 229, 255, 0.15)');
+
+    ctx.beginPath();
+    ctx.arc(this.knobX, this.knobY, this.knobRadius, 0, Math.PI * 2);
+    ctx.fillStyle = gradient;
+    ctx.fill();
+
+    ctx.strokeStyle = this.active ? 'rgba(0, 229, 255, 0.9)' : 'rgba(0, 229, 255, 0.4)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
 }
 
-function drawUserPreview(joints) {
-  // Left joystick: J1 (X) & J2 (Y)
-  drawJoystick(DOM.previewLeft, joints.J1 ?? 90, joints.J2 ?? 90);
-  // Right joystick: J3 (X) & J4 (Y)
-  drawJoystick(DOM.previewRight, joints.J3 ?? 90, joints.J4 ?? 90);
+let adminJoystickLeft = null;
+let adminJoystickRight = null;
+
+if (DOM.previewLeft && DOM.previewRight) {
+  adminJoystickLeft = new AdminJoystick('previewLeft', 'J1', 'J2');
+  adminJoystickRight = new AdminJoystick('previewRight', 'J3', 'J4');
 }
+
+// ---------------------------------------------------
+// Keyboard controls for admin joysticks
+// ---------------------------------------------------
+const adminActiveKeys = new Set();
+let currentAdminKeyboardStep = 2;
+const adminKeyboardSpeedSlider = document.getElementById('keyboardSpeed');
+const adminKeyboardSpeedValue = document.getElementById('keyboardSpeedValue');
+
+if (adminKeyboardSpeedSlider) {
+  adminKeyboardSpeedSlider.addEventListener('input', () => {
+    currentAdminKeyboardStep = parseInt(adminKeyboardSpeedSlider.value);
+    adminKeyboardSpeedValue.textContent = `${currentAdminKeyboardStep}° / tick`;
+    adminKeyboardSpeedSlider.style.setProperty('--fill', `${((currentAdminKeyboardStep - 1) / 9) * 100}%`);
+  });
+}
+
+window.addEventListener('keydown', (e) => {
+  if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) {
+    e.preventDefault();
+  }
+  adminActiveKeys.add(e.key.toLowerCase());
+});
+
+window.addEventListener('keyup', (e) => {
+  adminActiveKeys.delete(e.key.toLowerCase());
+});
+
+function processAdminKeyboardInput() {
+  if (!wsConnected || !userInputLocked || eStopEngaged) return;
+  
+  let changed = false;
+  const step = currentAdminKeyboardStep; // Degrees per tick
+
+  // Left Joystick (J1/J2) - WASD Keys
+  if (adminActiveKeys.has('a')) { adminJointState.J1 = Math.max(0, adminJointState.J1 - step); changed = true; }
+  if (adminActiveKeys.has('d')) { adminJointState.J1 = Math.min(180, adminJointState.J1 + step); changed = true; }
+  if (adminActiveKeys.has('w')) { adminJointState.J2 = Math.max(0, adminJointState.J2 - step); changed = true; }
+  if (adminActiveKeys.has('s')) { adminJointState.J2 = Math.min(180, adminJointState.J2 + step); changed = true; }
+
+  // Right Joystick (J3/J4) - Arrow Keys
+  if (adminActiveKeys.has('arrowleft')) { adminJointState.J3 = Math.max(0, adminJointState.J3 - step); changed = true; }
+  if (adminActiveKeys.has('arrowright')) { adminJointState.J3 = Math.min(180, adminJointState.J3 + step); changed = true; }
+  if (adminActiveKeys.has('arrowup')) { adminJointState.J4 = Math.max(0, adminJointState.J4 - step); changed = true; }
+  if (adminActiveKeys.has('arrowdown')) { adminJointState.J4 = Math.min(180, adminJointState.J4 + step); changed = true; }
+
+  if (changed) {
+    sendAdminJointState();
+    if (adminJoystickLeft) adminJoystickLeft.syncKnobFromState();
+    if (adminJoystickRight) adminJoystickRight.syncKnobFromState();
+  }
+}
+
+// Poll keyboard state at 50Hz
+setInterval(processAdminKeyboardInput, 20);
+
 
 
 /** Update connected clients list. */

@@ -319,7 +319,19 @@ function updateConnectionUI(connected) {
 function updateDriverUI() {
   if (!wsConnected) return;
   const driver = isDriver();
-  DOM.spectatorBanner.classList.toggle('visible', !driver);
+  
+  if (driver) {
+    DOM.spectatorBanner.innerHTML = '🎮 ACCESS GRANTED — YOU HAVE CONTROL';
+    DOM.spectatorBanner.style.borderColor = 'var(--primary-color)';
+    DOM.spectatorBanner.style.background = 'rgba(0, 229, 255, 0.05)';
+    DOM.spectatorBanner.style.color = 'var(--primary-color)';
+  } else {
+    DOM.spectatorBanner.innerHTML = '👀 SPECTATOR MODE — WAITING FOR ADMIN TO GRANT DRIVE ACCESS';
+    DOM.spectatorBanner.style.borderColor = 'var(--warning-color)';
+    DOM.spectatorBanner.style.background = 'rgba(255, 171, 0, 0.05)';
+    DOM.spectatorBanner.style.color = 'var(--warning-color)';
+  }
+
   DOM.driverBadge.style.display = driver ? 'inline-flex' : 'none';
   
   // Disable UI elements if not driver or if locked
@@ -1206,59 +1218,49 @@ function clearFrameHighlights() {
   // 5. Connect WebSocket (like HAL_UART_Init + enabling RX interrupt)
   connect();
 
-  // 6. Keyboard controls for joysticks
+  // 6. Keyboard controls for joysticks (Simultaneous multi-key support)
+  const activeKeys = new Set();
+  let currentKeyboardStep = 2;
+  const keyboardSpeedSlider = document.getElementById('keyboardSpeed');
+  const keyboardSpeedValue = document.getElementById('keyboardSpeedValue');
+  
+  if (keyboardSpeedSlider) {
+    keyboardSpeedSlider.addEventListener('input', () => {
+      currentKeyboardStep = parseInt(keyboardSpeedSlider.value);
+      if (keyboardSpeedValue) keyboardSpeedValue.textContent = `${currentKeyboardStep}° / tick`;
+      keyboardSpeedSlider.style.setProperty('--fill', `${((currentKeyboardStep - 1) / 9) * 100}%`);
+    });
+  }
+
   window.addEventListener('keydown', (e) => {
-    if (!wsConnected || !isDriver() || userInputLocked || eStopActive) return;
-    
     // Prevent scrolling for arrow keys
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) {
       e.preventDefault();
     }
+    activeKeys.add(e.key.toLowerCase());
+  });
+
+  window.addEventListener('keyup', (e) => {
+    activeKeys.delete(e.key.toLowerCase());
+  });
+
+  function processKeyboardInput() {
+    if (!wsConnected || !isDriver() || userInputLocked || eStopActive) return;
     
     let changed = false;
-    const step = 5; // Degrees per keypress tick
+    const step = currentKeyboardStep; // Degrees per tick
 
-    switch(e.key) {
-      // Left Joystick (J1/J2) - Arrow Keys
-      case 'ArrowLeft':
-        jointState.J1 = Math.max(0, jointState.J1 - step);
-        changed = true;
-        break;
-      case 'ArrowRight':
-        jointState.J1 = Math.min(180, jointState.J1 + step);
-        changed = true;
-        break;
-      case 'ArrowUp':
-        jointState.J2 = Math.min(180, jointState.J2 + step);
-        changed = true;
-        break;
-      case 'ArrowDown':
-        jointState.J2 = Math.max(0, jointState.J2 - step);
-        changed = true;
-        break;
-        
-      // Right Joystick (J3/J4) - WASD Keys
-      case 'w':
-      case 'W':
-        jointState.J4 = Math.min(180, jointState.J4 + step);
-        changed = true;
-        break;
-      case 's':
-      case 'S':
-        jointState.J4 = Math.max(0, jointState.J4 - step);
-        changed = true;
-        break;
-      case 'a':
-      case 'A':
-        jointState.J3 = Math.max(0, jointState.J3 - step);
-        changed = true;
-        break;
-      case 'd':
-      case 'D':
-        jointState.J3 = Math.min(180, jointState.J3 + step);
-        changed = true;
-        break;
-    }
+    // Left Joystick (J1/J2) - WASD Keys
+    if (activeKeys.has('a')) { jointState.J1 = Math.max(0, jointState.J1 - step); changed = true; }
+    if (activeKeys.has('d')) { jointState.J1 = Math.min(180, jointState.J1 + step); changed = true; }
+    if (activeKeys.has('w')) { jointState.J2 = Math.max(0, jointState.J2 - step); changed = true; }
+    if (activeKeys.has('s')) { jointState.J2 = Math.min(180, jointState.J2 + step); changed = true; }
+
+    // Right Joystick (J3/J4) - Arrow Keys
+    if (activeKeys.has('arrowleft')) { jointState.J3 = Math.max(0, jointState.J3 - step); changed = true; }
+    if (activeKeys.has('arrowright')) { jointState.J3 = Math.min(180, jointState.J3 + step); changed = true; }
+    if (activeKeys.has('arrowup')) { jointState.J4 = Math.max(0, jointState.J4 - step); changed = true; }
+    if (activeKeys.has('arrowdown')) { jointState.J4 = Math.min(180, jointState.J4 + step); changed = true; }
 
     if (changed) {
       syncSlidersFromState();
@@ -1266,7 +1268,10 @@ function clearFrameHighlights() {
       joystickLeft.syncKnobFromState();
       joystickRight.syncKnobFromState();
     }
-  });
+  }
+
+  // Poll keyboard state at 50Hz
+  setInterval(processKeyboardInput, 20);
 
   console.log('[BOOT] Init complete — all subsystems online.');
 })();

@@ -117,8 +117,16 @@
     <!-- ═══════════════════════ JOYSTICKS ═══════════════════════ -->
     <div class="control-grid">
       <div class="card">
-        <div class="card-title"><span class="icon">🕹️</span> Virtual Joysticks</div>
-        <div class="joystick-zone">
+      <div class="card-title"><span class="icon">🕹️</span> Virtual Joysticks</div>
+      
+      <!-- Keyboard Speed Slider -->
+      <div class="speed-control" style="margin: 0 var(--gap-lg) var(--gap-md);">
+        <span class="slider-label">Keyboard Joystick Speed</span>
+        <input type="range" id="keyboardSpeed" min="1" max="10" value="2" style="--fill: 11%">
+        <span class="slider-value" id="keyboardSpeedValue">2° / tick</span>
+      </div>
+
+      <div class="joystick-zone">
           <!-- Left joystick: Base (X) / Shoulder (Y) -->
           <div class="joystick-container">
             <canvas class="joystick-canvas" id="joystickLeft" width="200" height="200"></canvas>

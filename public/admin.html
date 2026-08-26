@@ -7,153 +7,227 @@
   <title>Robotic Arm — Admin Dashboard</title>
   <link rel="stylesheet" href="styles.css">
   <style>
-    /* ─── Admin-specific layout ─── */
-    .admin-grid {
-      display: grid;
-      grid-template-columns: 340px 1fr;
-      gap: var(--gap-lg);
-      margin-bottom: var(--gap-lg);
+    /* ─── Admin: viewport-fit layout ─── */
+
+    html, body { height: 100%; }
+
+    /* Scale base font down so everything breathes on a standard 1080p display */
+    html { font-size: 13px; }
+
+    .app-container {
+      max-width: 100%;
+      padding: 10px 14px;
+      min-height: 100vh;
+      box-sizing: border-box;
     }
 
-    .sidebar { display: flex; flex-direction: column; gap: var(--gap-lg); }
-    .main-area { display: flex; flex-direction: column; gap: var(--gap-lg); }
-
-    /* E-STOP zone */
-    .estop-zone {
+    /* ── Header ── */
+    .admin-header {
       display: flex;
-      flex-direction: column;
       align-items: center;
-      gap: var(--gap-lg);
-      padding: var(--gap-xl) var(--gap-lg);
+      justify-content: space-between;
+      padding: 10px 20px;
+      margin-bottom: 10px;
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      box-shadow: var(--shadow-card);
+      gap: 12px;
     }
+    .header-left  { display: flex; align-items: center; gap: 16px; }
+    .header-center{ display: flex; align-items: center; gap: 10px; }
+    .header-right { display: flex; align-items: center; gap: 16px; }
 
-    .estop-hint {
+    /* ── Takeover button ── */
+    .takeover-btn {
+      width: 110px; height: 110px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 30% 30%, #29b6f6, #0288d1, #01579b);
+      border: 3px solid #0288d1;
+      color: #fff;
       font-family: var(--font-mono);
       font-size: 0.65rem;
-      color: var(--text-muted);
-      text-align: center;
-      max-width: 180px;
-    }
-
-    /* Serial config form */
-    .serial-form {
-      display: flex;
-      flex-direction: column;
-      gap: var(--gap-md);
-    }
-
-    .serial-form-row {
-      display: flex;
-      align-items: center;
-      gap: var(--gap-sm);
-    }
-
-    .serial-form-row label {
-      font-family: var(--font-mono);
-      font-size: 0.72rem;
-      color: var(--text-secondary);
-      min-width: 50px;
+      font-weight: 700;
       text-transform: uppercase;
+      letter-spacing: 1px;
+      cursor: pointer;
+      transition: all var(--transition-med);
+      box-shadow: 0 0 0 4px rgba(2, 136, 209, 0.15), 0 0 16px rgba(2, 136, 209, 0.3);
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 4px; line-height: 1.2; user-select: none; flex-shrink: 0;
+    }
+    .takeover-btn:hover  { transform: scale(1.05); box-shadow: 0 0 0 6px rgba(2,136,209,0.25), 0 0 30px rgba(2,136,209,0.4); }
+    .takeover-btn:active { transform: scale(0.95); }
+    .takeover-btn.engaged {
+      background: radial-gradient(circle at 30% 30%, #ffab00, #ff8f00, #e65100);
+      border-color: #ff8f00;
+      animation: takeover-pulse 1.5s ease infinite;
+    }
+    @keyframes takeover-pulse {
+      0%, 100% { box-shadow: 0 0 0 4px rgba(255,143,0,0.2), 0 0 20px rgba(255,143,0,0.3); }
+      50%       { box-shadow: 0 0 0 8px rgba(255,143,0,0.35), 0 0 40px rgba(255,143,0,0.5); }
     }
 
-    .serial-form-row .select-input,
-    .serial-form-row .text-input {
-      flex: 1;
+    /* ── E-STOP (compact) ── */
+    .estop-btn-sm {
+      width: 110px; height: 110px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 30% 30%, #ff6b3d, #ff3d00, #cc3100);
+      border: 3px solid #ff3d00;
+      color: #fff;
+      font-family: var(--font-mono);
+      font-size: 0.65rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      cursor: pointer;
+      transition: all var(--transition-med);
+      box-shadow: 0 0 0 4px rgba(255,61,0,0.15), 0 0 16px rgba(255,61,0,0.3);
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 4px; line-height: 1.2; user-select: none; flex-shrink: 0;
+    }
+    .estop-btn-sm:hover  { transform: scale(1.05); box-shadow: 0 0 0 6px rgba(255,61,0,0.25), 0 0 30px rgba(255,61,0,0.5); }
+    .estop-btn-sm:active { transform: scale(0.95); }
+    .estop-btn-sm.engaged { animation: estop-sm-pulse 1s ease infinite; }
+    .estop-btn-sm.engaged:hover { background: radial-gradient(circle at 30% 30%, #ff8a65, #ff5722, #d84315); }
+    @keyframes estop-sm-pulse {
+      0%, 100% { box-shadow: 0 0 0 4px rgba(255,61,0,0.3), 0 0 20px rgba(255,61,0,0.4); }
+      50%       { box-shadow: 0 0 0 8px rgba(255,61,0,0.5), 0 0 40px rgba(255,61,0,0.6); }
     }
 
-    /* Stats grid */
-    .stats-grid {
+    /* ── Main two-column grid ── */
+    .admin-grid {
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      gap: 10px;
+      margin-bottom: 10px;
+      align-items: start;
+    }
+    .sidebar   { display: flex; flex-direction: column; gap: 10px; }
+    .main-area { display: flex; flex-direction: column; gap: 10px; }
+
+    /* ── Bottom row ── */
+    .admin-bottom {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: var(--gap-sm);
+      gap: 10px;
     }
 
+    /* ── Cards: tighter padding ── */
+    .card { padding: 12px 14px; }
+    .card-title { margin-bottom: 8px; font-size: 0.78rem; }
+
+    /* ── Stats grid ── */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 6px;
+    }
     .stat-card {
       background: var(--bg-input);
       border: 1px solid var(--border-subtle);
       border-radius: var(--radius-md);
-      padding: var(--gap-sm) var(--gap-md);
+      padding: 6px 8px;
       text-align: center;
     }
-
     .stat-card .stat-number {
       font-family: var(--font-mono);
-      font-size: 1.4rem;
+      font-size: 1.1rem;
       font-weight: 700;
       color: var(--accent-cyan);
       display: block;
     }
-
     .stat-card .stat-desc {
-      font-size: 0.65rem;
+      font-size: 0.58rem;
       color: var(--text-muted);
       text-transform: uppercase;
       letter-spacing: 0.5px;
     }
 
-    /* Console header */
+    /* ── Serial config form ── */
+    .serial-form { display: flex; flex-direction: column; gap: 8px; }
+    .serial-form-row { display: flex; align-items: center; gap: 6px; }
+    .serial-form-row label {
+      font-family: var(--font-mono);
+      font-size: 0.68rem;
+      color: var(--text-secondary);
+      min-width: 44px;
+      text-transform: uppercase;
+    }
+    .serial-form-row .select-input,
+    .serial-form-row .text-input { flex: 1; padding: 5px 8px; font-size: 0.75rem; }
+
+    /* ── Console header ── */
     .console-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: var(--gap-sm);
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 6px;
     }
+    .console-filters { display: flex; gap: 4px; }
+    .console-filters .btn { padding: 2px 7px; font-size: 0.58rem; }
 
-    .console-filters {
-      display: flex;
-      gap: var(--gap-xs);
-    }
-
-    .console-filters .btn {
-      padding: 3px 8px;
-      font-size: 0.6rem;
-    }
-
-    /* Client list */
-    .client-list {
-      display: flex;
-      flex-direction: column;
-      gap: var(--gap-xs);
-    }
-
+    /* ── Client list ── */
+    .client-list { display: flex; flex-direction: column; gap: 4px; }
     .client-item {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: var(--gap-sm) var(--gap-md);
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 5px 10px;
       background: var(--bg-input);
       border-radius: var(--radius-sm);
       border: 1px solid var(--border-subtle);
     }
-
     .client-item .client-id {
       font-family: var(--font-mono);
-      font-size: 0.72rem;
+      font-size: 0.68rem;
       color: var(--text-primary);
     }
 
-    .bottom-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: var(--gap-lg);
-    }
+    /* ── Log panels: fixed compact height ── */
+    .console-output { max-height: 130px !important; font-size: 0.7rem; }
 
-    @media (max-width: 1024px) {
+    /* ── Section divider ── */
+    .section-divider { border: none; border-top: 1px solid var(--border-subtle); margin: 8px 0; }
+
+    /* ── Joystick preview area ── */
+    .preview-grid { display: flex; gap: 12px; justify-content: center; }
+
+    /* ── Inputs & buttons ── */
+    .btn { padding: 5px 12px; font-size: 0.72rem; }
+    .btn-sm { padding: 3px 8px; font-size: 0.64rem; }
+    select.select-input { font-size: 0.75rem; }
+
+    /* ── Speed control slider ── */
+    .speed-control { margin-bottom: 8px; }
+    .speed-control .slider-label { font-size: 0.68rem; }
+
+    /* ── Hidden hint (used by JS internally) ── */
+    .estop-hint { display: none; }
+
+    /* ── Responsive breakpoints ── */
+    @media (max-width: 1100px) {
       .admin-grid { grid-template-columns: 1fr; }
-      .bottom-grid { grid-template-columns: 1fr; }
+      .admin-bottom { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 640px) {
+      html { font-size: 11px; }
+      .admin-header { flex-wrap: wrap; justify-content: center; }
+      .stats-grid { grid-template-columns: repeat(2, 1fr); }
     }
   </style>
+
 </head>
 <body>
   <div class="app-container">
 
-    <!-- ═══════════════════════════ HEADER ═══════════════════════════ -->
-    <header class="header" id="header">
-      <div>
-        <div class="header-title">⚙️ Admin Dashboard</div>
-        <div class="header-subtitle">Telemetry &amp; Hardware Bridge</div>
+    <!-- ═══════════════════════════ HEADER BAR ═══════════════════════════ -->
+    <div class="admin-header" id="header">
+      <div class="header-left">
+        <div>
+          <div class="header-title">⚙️ Admin Dashboard</div>
+          <div class="header-subtitle">Telemetry &amp; Hardware Bridge</div>
+        </div>
       </div>
-      <div class="header-status">
+      <div class="header-center">
         <div class="status-pill disconnected" id="statusPill">
           <span class="dot"></span>
           <span id="statusText">Disconnected</span>
@@ -165,52 +239,36 @@
           Uptime: <span id="uptimeValue">0s</span>
         </span>
       </div>
-    </header>
+      <div class="header-right"></div>
+      <!-- Hidden hint used by JS -->
+      <span class="estop-hint" id="estopHint"></span>
+    </div>
 
-    <!-- ═══════════════════════ MAIN GRID ═══════════════════════ -->
+    <!-- ═══════════════════ MAIN TWO-COLUMN GRID ═══════════════════ -->
     <div class="admin-grid">
 
-      <!-- ────────── SIDEBAR ────────── -->
+      <!-- ────────── LEFT SIDEBAR: Clients & Serial ────────── -->
       <div class="sidebar">
 
-        <!-- ── E-STOP & Master Control ── -->
+        <!-- Access Requests -->
         <div class="card">
-          <div class="card-title"><span class="icon">🛑</span> Master Control</div>
-          <div class="estop-zone">
-            <button class="estop-btn" id="btnEstop">
-              <span style="font-size: 1.8rem;">⛔</span>
-              E-STOP
-            </button>
-            <div class="estop-hint" id="estopHint">Click to ENGAGE emergency stop. All motors halt immediately.</div>
-          </div>
-
-          <!-- Lock User Toggle -->
-          <div class="toggle-container" style="padding: 0 var(--gap-md);">
-            <input type="checkbox" class="toggle" id="toggleLockUsers">
-            <span class="toggle-label">Lock User Input / Takeover</span>
-          </div>
-
-          <!-- Auth Requests -->
-          <div style="padding: var(--gap-md) var(--gap-md) 0;">
-            <div class="card-title" style="margin-bottom: var(--gap-sm);"><span class="icon">🔑</span> Access Requests</div>
-            <div class="client-list" id="authRequestsList">
-              <div style="color: var(--text-muted); font-size: 0.72rem; font-family: var(--font-mono);">No pending requests</div>
-            </div>
-          </div>
-
-          <!-- Connected clients -->
-          <div style="padding: var(--gap-md) var(--gap-md) 0;">
-            <div class="card-title" style="margin-bottom: var(--gap-sm);"><span class="icon">👥</span> Connected Clients</div>
-            <div class="client-list" id="clientList">
-              <div style="color: var(--text-muted); font-size: 0.72rem; font-family: var(--font-mono);">No clients connected</div>
-            </div>
+          <div class="card-title"><span class="icon">🔑</span> Access Requests</div>
+          <div class="client-list" id="authRequestsList">
+            <div style="color: var(--text-muted); font-size: 0.72rem; font-family: var(--font-mono);">No pending requests</div>
           </div>
         </div>
 
-        <!-- ── Serial / Hardware Bridge ── -->
+        <!-- Connected Clients -->
+        <div class="card">
+          <div class="card-title"><span class="icon">👥</span> Connected Clients</div>
+          <div class="client-list" id="clientList">
+            <div style="color: var(--text-muted); font-size: 0.72rem; font-family: var(--font-mono);">No clients connected</div>
+          </div>
+        </div>
+
+        <!-- Serial Bridge Manager -->
         <div class="card">
           <div class="card-title"><span class="icon">🔌</span> Serial Bridge Manager</div>
-
           <div class="serial-form" id="serialForm">
             <div class="serial-form-row">
               <label>Port</label>
@@ -219,7 +277,6 @@
               </select>
               <button class="btn btn-sm" id="btnRefreshPorts" title="Refresh port list">🔄</button>
             </div>
-
             <div class="serial-form-row">
               <label>Baud</label>
               <select class="select-input" id="serialBaud" style="flex:1;">
@@ -233,12 +290,10 @@
                 <option value="921600">921600</option>
               </select>
             </div>
-
             <div class="serial-form-row">
               <button class="btn btn-success" id="btnSerialConnect" style="flex:1;">⚡ Connect</button>
               <button class="btn btn-danger" id="btnSerialDisconnect" style="flex:1;" disabled>⏏ Disconnect</button>
             </div>
-
             <div class="serial-form-row">
               <span class="toggle-label">Hardware Heartbeat</span>
               <div class="heartbeat-led" id="serialHeartbeat"></div>
@@ -248,55 +303,117 @@
         </div>
       </div>
 
-      <!-- ────────── MAIN AREA ────────── -->
+      <!-- ────────── RIGHT MAIN AREA: State + Joysticks + Telemetry ────────── -->
       <div class="main-area">
 
-        <!-- ── Live Stats ── -->
+        <!-- Joint State -->
         <div class="card">
-          <div class="card-title"><span class="icon">📊</span> Live Telemetry</div>
-          <div class="stats-grid">
-            <div class="stat-card">
-              <span class="stat-number" id="statTxRate">0</span>
-              <span class="stat-desc">TX Rate (pkt/s)</span>
-            </div>
-            <div class="stat-card">
-              <span class="stat-number" id="statRxRate">0</span>
-              <span class="stat-desc">RX Rate (pkt/s)</span>
-            </div>
-            <div class="stat-card">
-              <span class="stat-number" id="statTxTotal">0</span>
-              <span class="stat-desc">Total TX Packets</span>
-            </div>
-            <div class="stat-card">
-              <span class="stat-number" id="statRxTotal">0</span>
-              <span class="stat-desc">Total RX Packets</span>
-            </div>
-            <div class="stat-card">
-              <span class="stat-number" id="statUsers">0</span>
-              <span class="stat-desc">Users Online</span>
-            </div>
-            <div class="stat-card">
-              <span class="stat-number" id="statAdmins">0</span>
-              <span class="stat-desc">Admins Online</span>
-            </div>
-          </div>
-
-          <!-- Live joint state readout -->
-          <div style="margin-top: var(--gap-md);">
-            <div class="card-title" style="margin-bottom: var(--gap-sm);"><span class="icon">🦾</span> Current Joint State</div>
-            <div id="jointReadout" style="display: grid; grid-template-columns: repeat(6, 1fr); gap: var(--gap-sm);">
-              <!-- Populated by admin.js -->
-            </div>
-            <!-- User Input Preview (read‑only joysticks) -->
-            <div class="card-title" style="margin-top: var(--gap-lg); margin-bottom: var(--gap-sm);"><span class="icon">🎮</span> User Input Preview</div>
-            <div class="preview-grid" style="display: flex; gap: var(--gap-md); justify-content: center;">
-              <canvas id="previewLeft" width="200" height="200"></canvas>
-              <canvas id="previewRight" width="200" height="200"></canvas>
-            </div>
-          </div>
+          <div class="card-title"><span class="icon">🦾</span> Current Joint State</div>
+          <div id="jointReadout" style="display: grid; grid-template-columns: repeat(6, 1fr); gap: var(--gap-sm);"></div>
         </div>
 
-        <!-- ── Serial Console ── -->
+        <!-- Joystick + Telemetry + Controls unified panel -->
+        <div class="card">
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; flex-wrap:wrap; gap:6px;">
+            <div class="card-title" style="margin:0;"><span class="icon">🎮</span> Joystick Control / Preview</div>
+            <div class="card-title" style="margin:0; color:var(--text-secondary);"><span class="icon">📊</span> Live Telemetry</div>
+            <!-- Keyboard Speed Slider — shown when takeover active -->
+            <div class="speed-control" id="adminKeyboardSpeedControl" style="margin:0; display:none; align-items:center; gap:6px;">
+              <span class="slider-label" style="white-space:nowrap;">KB Speed</span>
+              <input type="range" id="keyboardSpeed" min="1" max="10" value="2" style="--fill:11%; width:80px;">
+              <span class="slider-value" id="keyboardSpeedValue">2° / tick</span>
+            </div>
+          </div>
+
+          <!-- 5-column: Left Joy | Left Stats | Centre Controls | Right Stats | Right Joy -->
+          <div style="display:grid; grid-template-columns:auto 1fr auto 1fr auto; align-items:center; gap:20px;">
+
+            <!-- Left Joystick -->
+            <div style="display:flex; flex-direction:column; align-items:center; gap:4px;">
+              <span style="font-size:0.58rem; color:var(--text-muted); font-family:var(--font-mono); text-transform:uppercase; letter-spacing:1px;">WASD</span>
+              <canvas id="previewLeft" width="240" height="240"></canvas>
+              <span style="font-size:0.55rem; color:var(--text-muted); font-family:var(--font-mono);">J1 / J2</span>
+            </div>
+
+            <!-- Left stats column (3 cards) -->
+            <div style="display:flex; flex-direction:column; gap:6px; align-self:stretch; justify-content:center;">
+              <div class="stat-card" style="flex:1; display:flex; flex-direction:column; justify-content:center; align-items:center; padding:5px;">
+                <span class="stat-number" id="statTxRate" style="font-size:1rem;">0</span>
+                <span class="stat-desc" style="font-size:0.55rem; text-align:center;">TX Rate</span>
+              </div>
+              <div class="stat-card" style="flex:1; display:flex; flex-direction:column; justify-content:center; align-items:center; padding:5px;">
+                <span class="stat-number" id="statTxTotal" style="font-size:1rem;">0</span>
+                <span class="stat-desc" style="font-size:0.55rem; text-align:center;">Total TX</span>
+              </div>
+              <div class="stat-card" style="flex:1; display:flex; flex-direction:column; justify-content:center; align-items:center; padding:5px;">
+                <span class="stat-number" id="statUsers" style="font-size:1rem;">0</span>
+                <span class="stat-desc" style="font-size:0.55rem; text-align:center;">Users Online</span>
+              </div>
+            </div>
+
+            <!-- Centre: E-STOP (top) + Takeover (bottom) -->
+            <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; align-self:stretch;">
+              <button class="estop-btn-sm" id="btnEstop">
+                <span style="font-size:2.2rem;">⛔</span>
+                E-STOP
+              </button>
+              <button class="takeover-btn" id="toggleLockUsers">
+                <span style="font-size:2.2rem;">⚡</span>
+                TAKE<br>OVER
+              </button>
+            </div>
+
+            <!-- Right stats column (3 cards) -->
+            <div style="display:flex; flex-direction:column; gap:6px; align-self:stretch; justify-content:center;">
+              <div class="stat-card" style="flex:1; display:flex; flex-direction:column; justify-content:center; align-items:center; padding:5px;">
+                <span class="stat-number" id="statRxRate" style="font-size:1rem;">0</span>
+                <span class="stat-desc" style="font-size:0.55rem; text-align:center;">RX Rate</span>
+              </div>
+              <div class="stat-card" style="flex:1; display:flex; flex-direction:column; justify-content:center; align-items:center; padding:5px;">
+                <span class="stat-number" id="statRxTotal" style="font-size:1rem;">0</span>
+                <span class="stat-desc" style="font-size:0.55rem; text-align:center;">Total RX</span>
+              </div>
+              <div class="stat-card" style="flex:1; display:flex; flex-direction:column; justify-content:center; align-items:center; padding:5px;">
+                <span class="stat-number" id="statAdmins" style="font-size:1rem;">0</span>
+                <span class="stat-desc" style="font-size:0.55rem; text-align:center;">Admins Online</span>
+              </div>
+            </div>
+
+            <!-- Right Joystick -->
+            <div style="display:flex; flex-direction:column; align-items:center; gap:4px;">
+              <span style="font-size:0.58rem; color:var(--text-muted); font-family:var(--font-mono); text-transform:uppercase; letter-spacing:1px;">ARROWS</span>
+              <canvas id="previewRight" width="240" height="240"></canvas>
+              <span style="font-size:0.55rem; color:var(--text-muted); font-family:var(--font-mono);">J3 / J4</span>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </div>
+
+
+
+
+
+    <!-- ═══════════════════ BOTTOM ROW: Calibration + Logs ═══════════════════ -->
+    <div class="admin-bottom">
+
+      <!-- Servo Calibration -->
+      <div class="card">
+        <div class="card-title"><span class="icon">📐</span> Servo Calibration &amp; Safety Limits</div>
+        <p style="font-size: 0.72rem; color: var(--text-muted); margin-bottom: var(--gap-md);">
+          Set min/max angle bounds per servo to prevent mechanical collisions. Values clamped server-side.
+        </p>
+        <div id="calibrationPanel"></div>
+        <div style="margin-top: var(--gap-md); display: flex; gap: var(--gap-sm);">
+          <button class="btn btn-primary" id="btnApplyCalibration">✅ Apply Limits</button>
+          <button class="btn" id="btnResetCalibration">↩ Reset to Defaults</button>
+        </div>
+      </div>
+
+      <!-- Logs -->
+      <div style="display: flex; flex-direction: column; gap: var(--gap-lg);">
+        <!-- Serial Packet Monitor -->
         <div class="card">
           <div class="console-header">
             <div class="card-title" style="margin-bottom:0;"><span class="icon">🖥️</span> Serial Packet Monitor</div>
@@ -307,36 +424,17 @@
               <button class="btn btn-sm btn-danger" id="btnClearConsole">Clear</button>
             </div>
           </div>
-          <div class="console-output" id="consoleOutput">
+          <div class="console-output" id="consoleOutput" style="max-height: 180px;">
             <span class="sys">[SYS] Serial console ready. Awaiting connection...</span>
           </div>
         </div>
-      </div>
-    </div>
 
-    <!-- ═══════════════════════ BOTTOM ROW ═══════════════════════ -->
-    <div class="bottom-grid">
-
-      <!-- ── Calibration & Limits ── -->
-      <div class="card">
-        <div class="card-title"><span class="icon">📐</span> Servo Calibration &amp; Safety Limits</div>
-        <p style="font-size: 0.72rem; color: var(--text-muted); margin-bottom: var(--gap-md);">
-          Set min/max angle bounds per servo to prevent mechanical collisions. Values clamped server-side.
-        </p>
-        <div id="calibrationPanel">
-          <!-- Populated by admin.js -->
-        </div>
-        <div style="margin-top: var(--gap-md); display: flex; gap: var(--gap-sm);">
-          <button class="btn btn-primary" id="btnApplyCalibration">✅ Apply Limits</button>
-          <button class="btn" id="btnResetCalibration">↩ Reset to Defaults</button>
-        </div>
-      </div>
-
-      <!-- ── Command Log ── -->
-      <div class="card">
-        <div class="card-title"><span class="icon">📋</span> Command &amp; Event Log</div>
-        <div class="console-output" id="eventLog" style="max-height: 240px;">
-          <span class="sys">[SYS] Admin dashboard initialized</span>
+        <!-- Command & Event Log -->
+        <div class="card">
+          <div class="card-title"><span class="icon">📋</span> Command &amp; Event Log</div>
+          <div class="console-output" id="eventLog" style="max-height: 180px;">
+            <span class="sys">[SYS] Admin dashboard initialized</span>
+          </div>
         </div>
       </div>
     </div>
