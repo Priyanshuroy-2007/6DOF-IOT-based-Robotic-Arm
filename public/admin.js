@@ -227,9 +227,19 @@ function connect() {
     logEvent('err', `Disconnected from server (code: ${event.code})`);
 
     if (event.code === 4001) {
-      logEvent('err', 'Admin authentication failed or session replaced.');
+      logEvent('err', 'Admin authentication failed (Invalid Token).');
       sessionStorage.removeItem('robotic_arm_admin_token');
       ADMIN_TOKEN = null;
+      if (DOM.statusText) DOM.statusText.textContent = 'Auth Failed';
+      if (DOM.statusPill) DOM.statusPill.className = 'status-pill offline';
+      setTimeout(() => {
+        const token = prompt('Admin Token was invalid or session replaced.\nEnter the ADMIN_TOKEN printed in your server terminal:');
+        if (token && token.trim()) {
+          ADMIN_TOKEN = token.trim();
+          sessionStorage.setItem('robotic_arm_admin_token', ADMIN_TOKEN);
+          connect();
+        }
+      }, 500);
       return;
     }
     if (event.code === 4029) {
@@ -239,6 +249,21 @@ function connect() {
     }
     scheduleReconnect();
   };
+
+  if (DOM.statusPill && !DOM.statusPill._hasTokenListener) {
+    DOM.statusPill._hasTokenListener = true;
+    DOM.statusPill.style.cursor = 'pointer';
+    DOM.statusPill.title = 'Click to change Admin Token';
+    DOM.statusPill.addEventListener('click', () => {
+      const token = prompt('Enter Admin Token:', ADMIN_TOKEN || '');
+      if (token && token.trim()) {
+        ADMIN_TOKEN = token.trim();
+        sessionStorage.setItem('robotic_arm_admin_token', ADMIN_TOKEN);
+        if (ws) ws.close();
+        connect();
+      }
+    });
+  }
 
   ws.onerror = (err) => {
     console.error('[WS] Error:', err);

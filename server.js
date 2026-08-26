@@ -29,8 +29,27 @@ const express = require('express');
 const http = require('http');
 const { WebSocketServer } = require('ws');
 const path = require('path');
+const fs = require('fs');
 const crypto = require('crypto');
 const helmet = require('helmet');
+
+// Load environment variables from .env if present
+try {
+  const envPath = path.join(__dirname, '.env');
+  if (fs.existsSync(envPath)) {
+    const envContent = fs.readFileSync(envPath, 'utf8');
+    for (const line of envContent.split('\n')) {
+      const trimmed = line.trim();
+      if (trimmed && !trimmed.startsWith('#') && trimmed.includes('=')) {
+        const [key, ...rest] = trimmed.split('=');
+        const val = rest.join('=').trim().replace(/^["']|["']$/g, '');
+        if (key.trim() && !process.env[key.trim()]) {
+          process.env[key.trim()] = val;
+        }
+      }
+    }
+  }
+} catch (e) {}
 
 /* ---------------------------------------------------------------------------
  *  Attempt to load serialport. If not installed or on a system without
@@ -55,14 +74,14 @@ const CONFIG = {
     const randomToken = crypto.randomBytes(16).toString('hex');
     console.log('\n================================================================');
     console.log(` 🔑 GENERATED ADMIN TOKEN: ${randomToken}`);
-    console.log(' (Set the ADMIN_TOKEN environment variable to override this)');
+    console.log(' (Set the ADMIN_TOKEN in .env or environment to persist this)');
     console.log('================================================================\n');
     return randomToken;
   })(),
 
   // Watchdog interval & timeout (ms) — maps to STM32 IWDG prescaler/reload
-  WATCHDOG_INTERVAL: 500,
-  HEARTBEAT_TIMEOUT: 5000,
+  WATCHDOG_INTERVAL: 1000,
+  HEARTBEAT_TIMEOUT: 10000,
 
   // Throttle gate — max send rate to serial (50Hz = 20ms period)
   // Like a SysTick-gated output timer on the MCU
@@ -944,8 +963,9 @@ setInterval(() => {
 
   /* ---- Check heartbeats ---- */
   for (const [ws, info] of clients) {
-    if (now - info.lastHeartbeat > CONFIG.HEARTBEAT_TIMEOUT) {
-      console.warn(`[WATCHDOG] ${info.id} heartbeat timeout — disconnecting`);
+    const timeout = info.role === 'login' ? 60000 : CONFIG.HEARTBEAT_TIMEOUT;
+    if (now - info.lastHeartbeat > timeout) {
+      console.warn(`[WATCHDOG] ${info.id} (${info.role}) heartbeat timeout — disconnecting`);
       ws.close(4002, 'Heartbeat timeout');
       disconnectClient(ws, 'Heartbeat timeout');
     }
