@@ -62,7 +62,7 @@ const CONFIG = {
 
   // Watchdog interval & timeout (ms) — maps to STM32 IWDG prescaler/reload
   WATCHDOG_INTERVAL: 500,
-  HEARTBEAT_TIMEOUT: 1500,
+  HEARTBEAT_TIMEOUT: 5000,
 
   // Throttle gate — max send rate to serial (50Hz = 20ms period)
   // Like a SysTick-gated output timer on the MCU
@@ -184,7 +184,8 @@ function generateClientId() {
 const connectionRateLimit = new Map();
 
 wss.on('connection', (ws, req) => {
-  const ip = req.socket.remoteAddress;
+  const forwarded = req.headers['x-forwarded-for'];
+  const ip = (forwarded ? forwarded.split(',')[0].trim() : req.socket.remoteAddress) || '127.0.0.1';
   const now = Date.now();
   let connRl = connectionRateLimit.get(ip);
   if (!connRl || now - connRl.windowStart > 60000) {
@@ -192,7 +193,8 @@ wss.on('connection', (ws, req) => {
   }
   connRl.count++;
   connectionRateLimit.set(ip, connRl);
-  if (connRl.count > 30) {
+  if (connRl.count > 120) {
+    console.warn(`[SECURITY] Connection rate limit exceeded for IP: ${ip}`);
     ws.close(4029, 'Too many connections');
     return;
   }
@@ -219,15 +221,14 @@ wss.on('connection', (ws, req) => {
       ws.close(4001, 'Unauthorized');
       return;
     }
-    // Single admin session policy
+    // Single admin session policy: notify previous admin before closing
     for (const [existingWs, info] of clients.entries()) {
-      if (info.role === 'admin') {
+      if (info.role === 'admin' && existingWs !== ws) {
         console.log(`[ADMIN] Replaced older admin session ${info.id}`);
         try {
-          existingWs.send(JSON.stringify({ type: 'kicked', reason: 'Another admin logged in.' }));
+          existingWs.send(JSON.stringify({ type: 'kicked', reason: 'Another admin session was opened.' }));
         } catch (e) {}
         existingWs.close(4001, 'Replaced');
-        disconnectClient(existingWs, 'Replaced by new admin');
       }
     }
   }
@@ -314,10 +315,6 @@ function disconnectClient(ws, reason) {
   if (!info) return;
 
   console.log(`[WS] ${info.id} (${info.role}) disconnected - ${reason}`);
-
-  if (info.token) {
-    validUserTokens.delete(info.token);
-  }
 
   clients.delete(ws);
   updateClientCounts();

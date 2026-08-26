@@ -107,11 +107,17 @@ const THROTTLE_MS = 20;           // 50Hz max send rate
  */
 function connect() {
   const urlParams = new URLSearchParams(window.location.search);
-  const token = urlParams.get('token') || sessionStorage.getItem('robotic_arm_token');
+  let token = urlParams.get('token') || sessionStorage.getItem('robotic_arm_token');
   
   if (!token) {
     window.location.href = '/login.html';
     return;
+  }
+
+  // Store in sessionStorage and clean token from URL
+  sessionStorage.setItem('robotic_arm_token', token);
+  if (window.location.search.includes('token=')) {
+    window.history.replaceState({}, document.title, window.location.pathname);
   }
 
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -154,6 +160,18 @@ function connect() {
     if (typeof stopPlayback === 'function') stopPlayback();
     if (typeof isRecording !== 'undefined' && isRecording && typeof stopRecording === 'function') stopRecording();
 
+    if (event.code === 4001) {
+      console.warn('[AUTH] Session invalid or expired. Redirecting to login.');
+      sessionStorage.removeItem('robotic_arm_token');
+      window.location.href = '/login.html';
+      return;
+    }
+    if (event.code === 4029) {
+      console.warn('[WS] Rate limit reached. Retrying in 10s...');
+      setTimeout(connect, 10000);
+      return;
+    }
+
     scheduleReconnect();
   };
 
@@ -168,7 +186,7 @@ function connect() {
  * Similar to CAN bus error recovery with increasing retry intervals.
  */
 function scheduleReconnect() {
-  const delay = Math.min(500 * Math.pow(2, reconnectAttempts), MAX_RECONNECT_DELAY);
+  const delay = Math.min(1000 * Math.pow(1.5, reconnectAttempts), MAX_RECONNECT_DELAY);
   reconnectAttempts++;
   console.log(`[WS] Reconnecting in ${delay}ms (attempt ${reconnectAttempts})`);
   setTimeout(connect, delay);

@@ -34,7 +34,15 @@
  *
  * We extract it from the URL query params (?token=xxx) or use the default.
  */
-const ADMIN_TOKEN = new URLSearchParams(window.location.search).get('token');
+let ADMIN_TOKEN = new URLSearchParams(window.location.search).get('token') || sessionStorage.getItem('robotic_arm_admin_token');
+
+if (ADMIN_TOKEN) {
+  sessionStorage.setItem('robotic_arm_admin_token', ADMIN_TOKEN);
+  // Clean URL to prevent leaking token in browser history/bar
+  if (window.location.search.includes('token=')) {
+    window.history.replaceState({}, document.title, window.location.pathname);
+  }
+}
 
 /**
  * Joint configuration table — same as user.js for consistency.
@@ -161,6 +169,21 @@ let heartbeatInterval = null;
 let lastHeartbeatSent = 0;
 
 function connect() {
+  if (!ADMIN_TOKEN) {
+    ADMIN_TOKEN = sessionStorage.getItem('robotic_arm_admin_token');
+  }
+  if (!ADMIN_TOKEN) {
+    ADMIN_TOKEN = prompt('Enter Admin Access Token:');
+    if (ADMIN_TOKEN) {
+      sessionStorage.setItem('robotic_arm_admin_token', ADMIN_TOKEN);
+    } else {
+      if (DOM.statusText) DOM.statusText.textContent = 'Token Required';
+      if (DOM.statusPill) DOM.statusPill.className = 'status-pill offline';
+      logEvent('err', 'Admin Token is required to connect.');
+      return;
+    }
+  }
+
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const url = `${protocol}//${location.host}?role=admin&token=${ADMIN_TOKEN}`;
 
@@ -202,6 +225,18 @@ function connect() {
     updateConnectionUI(false);
     clearInterval(heartbeatInterval);
     logEvent('err', `Disconnected from server (code: ${event.code})`);
+
+    if (event.code === 4001) {
+      logEvent('err', 'Admin authentication failed or session replaced.');
+      sessionStorage.removeItem('robotic_arm_admin_token');
+      ADMIN_TOKEN = null;
+      return;
+    }
+    if (event.code === 4029) {
+      logEvent('err', 'Rate limit exceeded. Waiting 10s before retry...');
+      setTimeout(connect, 10000);
+      return;
+    }
     scheduleReconnect();
   };
 
@@ -211,7 +246,7 @@ function connect() {
 }
 
 function scheduleReconnect() {
-  const delay = Math.min(500 * Math.pow(2, reconnectAttempts), 10000);
+  const delay = Math.min(1000 * Math.pow(1.5, reconnectAttempts), 10000);
   reconnectAttempts++;
   setTimeout(connect, delay);
 }
