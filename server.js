@@ -168,7 +168,20 @@ let rxTimestamps = [];
  *  EXPRESS HTTP SERVER
  * ========================================================================= */
 const app = express();
-app.use(helmet());
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'"],
+        scriptSrcAttr: ["'unsafe-inline'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", "data:", "blob:"],
+        connectSrc: ["'self'", "ws:", "wss:", "http:", "https:"],
+      },
+    },
+  })
+);
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Redirect root to login page
@@ -337,7 +350,11 @@ function disconnectClient(ws, reason) {
 
   clients.delete(ws);
   updateClientCounts();
-  broadcastToRole('admin', { type: 'client_disconnected', clientId: info.id });
+  broadcastToRole('admin', {
+    type: 'client_disconnected',
+    clientId: info.id,
+    connectedClients: getClientList(),
+  });
 
   if (info.id === activeDriverId) {
     activeDriverId = null;
@@ -570,8 +587,8 @@ function routeMessage(ws, clientInfo, msg) {
           try {
             clientWs.send(JSON.stringify({ type: 'kicked', reason: 'You have been logged out by the Admin.' }));
           } catch(e) {}
-          // Small delay so message is sent before closing
-          setTimeout(() => clientWs.close(1000, 'Logged out by admin'), 200);
+          clientWs.close(4001, 'Logged out by admin');
+          disconnectClient(clientWs, 'Logged out by admin');
           kicked = true;
           break;
         }

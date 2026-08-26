@@ -387,6 +387,11 @@ function handleServerMessage(msg) {
 
     case 'client_disconnected':
       logEvent('err', `Client ${msg.clientId} disconnected`);
+      if (msg.connectedClients) {
+        updateClientList(msg.connectedClients);
+      } else if (lastKnownClients) {
+        updateClientList(lastKnownClients.filter(c => c.id !== msg.clientId));
+      }
       break;
 
     /* ── Calibration ACK ── */
@@ -1027,6 +1032,22 @@ setInterval(processAdminKeyboardInput, 20);
 
 
 
+function setDriver(clientId) {
+  if (wsConnected && ws) {
+    ws.send(JSON.stringify({ type: 'assign_driver', clientId: clientId }));
+    logEvent('sys', clientId ? `Granting control to ${clientId}` : 'Revoked driver control');
+  }
+}
+window.setDriver = setDriver;
+
+function kickClient(clientId) {
+  if (wsConnected && ws) {
+    ws.send(JSON.stringify({ type: 'kick_client', clientId: clientId }));
+    logEvent('sys', `Logging out client ${clientId}`);
+  }
+}
+window.kickClient = kickClient;
+
 /** Update connected clients list. */
 function updateClientList(clientsList) {
   lastKnownClients = clientsList;
@@ -1043,41 +1064,71 @@ function updateClientList(clientsList) {
     const roleBadgeClass = client.role === 'admin' ? 'badge-yellow' : 'badge-cyan';
     const usernameStr = client.username ? ` (${escapeHtml(client.username)})` : '';
     
-    // Grant/Revoke button for users
-    let actionBtn = '';
+    const infoDiv = document.createElement('div');
+    infoDiv.style.display = 'flex';
+    infoDiv.style.alignItems = 'center';
+    infoDiv.style.gap = 'var(--gap-sm)';
+    infoDiv.innerHTML = `
+      <span class="client-id">${escapeHtml(client.id)}${usernameStr}</span>
+      <span class="badge ${roleBadgeClass}">${client.role}</span>
+      ${activeDriverId === client.id ? '<span class="badge badge-green">DRIVER</span>' : ''}
+    `;
+
+    const actionsDiv = document.createElement('div');
+    actionsDiv.style.display = 'flex';
+    actionsDiv.style.gap = '4px';
+
     if (client.role === 'user') {
       if (activeDriverId === client.id) {
-        actionBtn = `<button class="btn btn-sm btn-danger" onclick="setDriver(null)">Revoke</button>`;
+        const btnRevoke = document.createElement('button');
+        btnRevoke.className = 'btn btn-sm btn-danger';
+        btnRevoke.textContent = 'Revoke';
+        btnRevoke.addEventListener('click', (e) => {
+          e.stopPropagation();
+          setDriver(null);
+        });
+        actionsDiv.appendChild(btnRevoke);
       } else {
-        actionBtn = `<button class="btn btn-sm btn-primary" onclick="setDriver('${client.id}')">Grant Control</button>`;
+        const btnGrant = document.createElement('button');
+        btnGrant.className = 'btn btn-sm btn-primary';
+        btnGrant.textContent = 'Grant Control';
+        btnGrant.addEventListener('click', (e) => {
+          e.stopPropagation();
+          setDriver(client.id);
+        });
+        actionsDiv.appendChild(btnGrant);
       }
-      actionBtn += ` <button class="btn btn-sm btn-danger" onclick="kickClient('${client.id}')" title="Logout this user">⏻ Logout</button>`;
+
+      const btnKick = document.createElement('button');
+      btnKick.className = 'btn btn-sm btn-danger';
+      btnKick.textContent = '⏻ Logout';
+      btnKick.title = 'Logout this user';
+      btnKick.addEventListener('click', (e) => {
+        e.stopPropagation();
+        kickClient(client.id);
+      });
+      actionsDiv.appendChild(btnKick);
     }
 
-    item.innerHTML = `
-      <div style="display:flex; align-items:center; gap:var(--gap-sm);">
-        <span class="client-id">${client.id}${usernameStr}</span>
-        <span class="badge ${roleBadgeClass}">${client.role}</span>
-        ${activeDriverId === client.id ? '<span class="badge badge-green">DRIVER</span>' : ''}
-      </div>
-      <div style="display:flex; gap:4px;">${actionBtn}</div>
-    `;
+    item.appendChild(infoDiv);
+    item.appendChild(actionsDiv);
     DOM.clientList.appendChild(item);
   }
 }
 
-window.setDriver = function(clientId) {
-  if (wsConnected) {
-    ws.send(JSON.stringify({ type: 'assign_driver', clientId: clientId }));
-  }
-};
-
-window.kickClient = function(clientId) {
-  if (wsConnected) {
-    ws.send(JSON.stringify({ type: 'kick_client', clientId: clientId }));
-    logEvent(`Logged out client ${clientId}`, 'warn');
-  }
-};
+// Admin Header Logout Button Handler
+const btnAdminLogout = document.getElementById('btnAdminLogout');
+if (btnAdminLogout) {
+  btnAdminLogout.addEventListener('click', () => {
+    if (confirm('Log out from Admin Dashboard?')) {
+      sessionStorage.removeItem('robotic_arm_admin_token');
+      if (ws) {
+        ws.close(1000, 'Admin logged out');
+      }
+      window.location.href = '/login.html';
+    }
+  });
+}
 
 function updateAuthRequests(requests) {
   if (!requests || requests.length === 0) {

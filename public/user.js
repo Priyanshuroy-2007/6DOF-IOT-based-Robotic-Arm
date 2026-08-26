@@ -1167,8 +1167,15 @@ function updateFramesTable() {
       <td>${frame.J4}°</td>
       <td>${frame.J5}°</td>
       <td>${frame.J6}°</td>
-      <td><button class="btn btn-danger btn-sm" onclick="deleteFrame(${frame.index})">✕</button></td>
     `;
+
+    const tdAction = document.createElement('td');
+    const delBtn = document.createElement('button');
+    delBtn.className = 'btn btn-danger btn-sm';
+    delBtn.textContent = '✕';
+    delBtn.addEventListener('click', () => deleteFrame(frame.index));
+    tdAction.appendChild(delBtn);
+    tr.appendChild(tdAction);
 
     DOM.framesBody.appendChild(tr);
   }
