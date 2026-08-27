@@ -56,7 +56,7 @@ Browser (User / Admin)
 - **Grant / Revoke** — Give or remove driving access per user
 - **⏻ Logout** — Force-disconnect any user; they are redirected to the login page
 - **E-Stop control** — Latching emergency stop that halts all motors and locks the UI
-- **User input lock** — Lock/unlock user controls without triggering E-Stop
+- **User input lock (Takeover)** — Lock user controls while keeping their dashboards synced to the live arm
 - **Serial bridge config** — Configure COM port and baud rate directly from the browser
 - **Calibration panel** — Set per-servo min/max angle limits
 - **Joystick preview** — Live preview of the arm's current joint state
@@ -87,7 +87,8 @@ RoboticArmWebUI/
 ├── server.js                  # Node.js WebSocket + HTTP server
 ├── package.json
 ├── public/
-│   ├── login.html             # OTP login page
+│   ├── user_login.html        # Standard user OTP login
+│   ├── admin_login.html       # Direct admin token login
 │   ├── login.js               # Login logic & WebSocket handshake
 │   ├── user.html              # User control panel
 │   ├── user.js                # Joystick, sliders, keyboard, Teach & Replay
@@ -161,9 +162,10 @@ Copy the `https://...ngrok-free.app` URL and share it with users.
 
 | Page | URL |
 |---|---|
-| Login (Users) | `http://localhost:3000/login.html` |
+| Login (Users) | `http://localhost:3000/user_login.html` |
+| Login (Admin) | `http://localhost:3000/admin_login.html` |
 | User Control | `http://localhost:3000/user.html` |
-| Admin Dashboard | `http://localhost:3000/admin.html?token=roboarm2026` |
+| Admin Dashboard | `http://localhost:3000/admin.html?token=PR29` |
 
 > **For remote access**, replace `localhost:3000` with your Ngrok URL.
 
@@ -172,7 +174,7 @@ Copy the `https://...ngrok-free.app` URL and share it with users.
 ## 🔒 Authentication Flow
 
 ```
-User visits /login.html
+User visits /user_login.html
         │
         │  Enters username → "Request OTP"
         ▼
@@ -238,7 +240,7 @@ Key settings inside `server.js`:
 ```js
 const CONFIG = {
   PORT: 3000,
-  ADMIN_TOKEN: 'roboarm2026',   // Change this in production!
+  ADMIN_TOKEN: 'PR29',          // Admin authentication token
   THROTTLE_MS: 20,              // Joint state broadcast rate (50Hz)
   WATCHDOG_MS: 1500,            // Heartbeat timeout
   BAUD_RATE: 115200,            // Default serial baud rate
