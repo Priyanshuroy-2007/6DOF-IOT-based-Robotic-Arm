@@ -9,29 +9,22 @@
   <title>Robotic Arm — Control Panel</title>
   <link rel="stylesheet" href="styles.css">
   <style>
-    /* Page-specific layout overrides */
-    .control-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
+    .control-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
       gap: var(--gap-lg);
       margin-bottom: var(--gap-lg);
+      flex-wrap: nowrap;
     }
 
-    .joystick-zone {
-      display: flex;
-      flex-direction: row;
-      /* always horizontal */
-      justify-content: space-around;
-      align-items: center;
-      flex-wrap: nowrap;
-      /* never stack vertically */
-      gap: var(--gap-lg);
-      padding: var(--gap-lg);
+    .slider-panel {
+      flex: 1 1 auto;
+      min-width: 220px;
     }
 
     .joystick-container {
       flex: 0 0 auto;
-      /* don't shrink below canvas size */
     }
 
     .teach-controls {
@@ -49,11 +42,19 @@
       margin-left: auto;
     }
 
-    @media (max-width: 768px) {
-      .control-grid {
-        grid-template-columns: 1fr;
+    @media (max-width: 992px) {
+      .control-row {
+        flex-wrap: wrap;
+        justify-content: center;
       }
+      .slider-panel {
+        order: -1; /* Push sliders to top on mobile */
+        width: 100%;
+        margin-bottom: var(--gap-md);
+      }
+    }
 
+    @media (max-width: 768px) {
       /* joystick-zone stays horizontal on mobile — only scale the canvases down */
       .joystick-canvas {
         width: 130px !important;
@@ -83,7 +84,10 @@
         <div class="header-title">🤖 Robotic Arm Control</div>
         <div class="header-subtitle">6-DOF Real-Time Web Controller</div>
       </div>
-      <div class="header-status">
+      <div class="header-status" style="display: flex; align-items: center;">
+        <button class="btn btn-sm btn-primary" id="btnUserDefault" title="Reset all joints to 90" style="font-size: 0.75rem; padding: 6px 14px; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; margin-right: 8px;">
+          <span>🎯</span> Default
+        </button>
         <div class="status-pill disconnected" id="statusPill">
           <span class="dot"></span>
           <span id="statusText">Disconnected</span>
@@ -114,41 +118,41 @@
       ⛔ EMERGENCY STOP ENGAGED — All Motors Halted
     </div>
 
-    <!-- ═══════════════════════ JOYSTICKS ═══════════════════════ -->
-    <div class="control-grid">
-      <div class="card">
-      <div class="card-title"><span class="icon">🕹️</span> Virtual Joysticks</div>
+    <!-- ═══════════════════════ MAIN CONTROLS ═══════════════════════ -->
+    <div class="card control-row">
       
-      <!-- Keyboard Speed Slider -->
-      <div class="speed-control" style="margin: 0 var(--gap-lg) var(--gap-md);">
-        <span class="slider-label">Keyboard Joystick Speed</span>
-        <input type="range" id="keyboardSpeed" min="1" max="10" value="2" style="--fill: 11%">
-        <span class="slider-value" id="keyboardSpeedValue">2° / tick</span>
+      <!-- Left joystick: Base (X) / Shoulder (Y) -->
+      <div class="joystick-container">
+        <canvas class="joystick-canvas" id="joystickLeft" width="260" height="260"></canvas>
+        <div class="joystick-label">Base / Shoulder</div>
+        <div class="joystick-values" id="joystickLeftValues">X: 90° — Y: 90°</div>
       </div>
 
-      <div class="joystick-zone">
-          <!-- Left joystick: Base (X) / Shoulder (Y) -->
-          <div class="joystick-container">
-            <canvas class="joystick-canvas" id="joystickLeft" width="200" height="200"></canvas>
-            <div class="joystick-label">Base / Shoulder</div>
-            <div class="joystick-values" id="joystickLeftValues">X: 90° — Y: 90°</div>
-          </div>
-          <!-- Right joystick: Elbow (X) / Wrist Pitch (Y) -->
-          <div class="joystick-container">
-            <canvas class="joystick-canvas" id="joystickRight" width="200" height="200"></canvas>
-            <div class="joystick-label">Elbow / Wrist Pitch</div>
-            <div class="joystick-values" id="joystickRightValues">X: 90° — Y: 90°</div>
+      <!-- Center: Sliders -->
+      <div class="slider-panel">
+        
+        <!-- Joystick Sensitivity Slider -->
+        <div style="margin-bottom: var(--gap-lg); padding-bottom: var(--gap-md); border-bottom: 1px solid rgba(255,255,255,0.05);">
+          <div class="speed-control">
+            <span class="slider-label" style="font-size: 0.75rem; color: var(--accent-cyan);">JOYSTICK SENSITIVITY</span>
+            <input type="range" id="joystickSensitivity" min="1" max="15" value="5" style="--fill: 33%;">
+            <span class="slider-value" id="joystickSensitivityValue">5° / tick</span>
           </div>
         </div>
-      </div>
 
-      <!-- ═══════════════════════ SLIDERS ═══════════════════════ -->
-      <div class="card">
-        <div class="card-title"><span class="icon">🎚️</span> Joint Sliders — Manual Override</div>
+        <div class="card-title" style="justify-content: center;"><span class="icon">🎚️</span> Joint Sliders — Manual Override</div>
         <div class="slider-group" id="sliderGroup">
           <!-- Sliders are generated by user.js -->
         </div>
       </div>
+
+      <!-- Right joystick: Elbow (X) / Wrist Pitch (Y) -->
+      <div class="joystick-container">
+        <canvas class="joystick-canvas" id="joystickRight" width="260" height="260"></canvas>
+        <div class="joystick-label">Elbow / Wrist Pitch</div>
+        <div class="joystick-values" id="joystickRightValues">X: 90° — Y: 90°</div>
+      </div>
+      
     </div>
 
     <!-- ═══════════════════ TEACH & REPLAY ═══════════════════ -->

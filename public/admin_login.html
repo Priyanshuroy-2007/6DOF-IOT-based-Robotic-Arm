@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Secure Access Lobby for Robotic Arm">
+  <title>Robotic Arm — Lobby</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    /* ── Full-screen login layout ── */
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      margin: 0;
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* ── Animated gradient orbs behind everything ── */
+    .bg-orb {
+      position: fixed;
+      border-radius: 50%;
+      filter: blur(100px);
+      opacity: 0.25;
+      z-index: 0;
+      pointer-events: none;
+    }
+    .bg-orb--1 {
+      width: 500px; height: 500px;
+      background: radial-gradient(circle, #00e5ff, transparent 70%);
+      top: -10%; left: -10%;
+      animation: orbit1 18s ease-in-out infinite alternate;
+    }
+    .bg-orb--2 {
+      width: 400px; height: 400px;
+      background: radial-gradient(circle, #ff3d00, transparent 70%);
+      bottom: -15%; right: -10%;
+      animation: orbit2 22s ease-in-out infinite alternate;
+    }
+    .bg-orb--3 {
+      width: 300px; height: 300px;
+      background: radial-gradient(circle, #00e676, transparent 70%);
+      top: 50%; left: 60%;
+      animation: orbit3 15s ease-in-out infinite alternate;
+    }
+
+    @keyframes orbit1 {
+      0% { transform: translate(0, 0) scale(1); }
+      100% { transform: translate(80px, 60px) scale(1.15); }
+    }
+    @keyframes orbit2 {
+      0% { transform: translate(0, 0) scale(1); }
+      100% { transform: translate(-70px, -50px) scale(1.1); }
+    }
+    @keyframes orbit3 {
+      0% { transform: translate(0, 0) scale(1); }
+      100% { transform: translate(-40px, 30px) scale(0.9); }
+    }
+
+    /* ── Floating particles canvas ── */
+    #particlesCanvas {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      z-index: 0;
+      pointer-events: none;
+    }
+
+    /* ── Login container ── */
+    .login-container {
+      position: relative;
+      z-index: 1;
+      width: 100%;
+      max-width: 460px;
+      padding: 0 var(--gap-lg);
+    }
+
+    /* ── Branding header ── */
+    .login-brand {
+      text-align: center;
+      margin-bottom: var(--gap-xl);
+    }
+    .login-brand .robot-icon {
+      width: 72px; height: 72px;
+      margin: 0 auto var(--gap-md);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 50%;
+      background: rgba(0, 229, 255, 0.08);
+      border: 1px solid rgba(0, 229, 255, 0.2);
+      box-shadow: 0 0 30px rgba(0, 229, 255, 0.15), 0 0 60px rgba(0, 229, 255, 0.05);
+      font-size: 2rem;
+      animation: pulse-glow 3s ease-in-out infinite;
+    }
+    @keyframes pulse-glow {
+      0%, 100% { box-shadow: 0 0 30px rgba(0, 229, 255, 0.15), 0 0 60px rgba(0, 229, 255, 0.05); }
+      50% { box-shadow: 0 0 40px rgba(0, 229, 255, 0.3), 0 0 80px rgba(0, 229, 255, 0.1); }
+    }
+    .login-brand h1 {
+      font-size: 1.6rem;
+      font-weight: 700;
+      color: var(--text-primary);
+      margin: 0 0 4px;
+      letter-spacing: -0.5px;
+    }
+    .login-brand h1 span {
+      background: linear-gradient(135deg, var(--accent-cyan), #00b8d4);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .login-brand p {
+      color: var(--text-muted);
+      font-size: 0.85rem;
+      margin: 0;
+      font-family: var(--font-mono);
+    }
+
+    /* ── Card ── */
+    .login-card {
+      width: 100%;
+      padding: var(--gap-xl) var(--gap-xl) var(--gap-lg);
+      background: rgba(12, 16, 28, 0.8);
+      border: 1px solid rgba(0, 229, 255, 0.1);
+      border-radius: var(--radius-lg);
+      backdrop-filter: blur(24px);
+      -webkit-backdrop-filter: blur(24px);
+      box-shadow:
+        0 8px 32px rgba(0, 0, 0, 0.5),
+        0 0 0 1px rgba(0, 229, 255, 0.06),
+        inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    }
+
+    /* ── Step label ── */
+    .step-label {
+      display: flex;
+      align-items: center;
+      gap: var(--gap-sm);
+      margin-bottom: var(--gap-lg);
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: var(--text-muted);
+    }
+    .step-label::before {
+      content: '';
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--accent-cyan);
+      box-shadow: 0 0 8px var(--accent-cyan);
+      animation: blink-dot 2s ease-in-out infinite;
+    }
+    @keyframes blink-dot {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+
+    /* ── Form ── */
+    .form-group {
+      margin-bottom: var(--gap-lg);
+    }
+    .form-group label {
+      display: block;
+      margin-bottom: var(--gap-xs);
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    .form-group input {
+      width: 100%;
+      padding: 14px 16px;
+      background: rgba(10, 14, 23, 0.9);
+      border: 1px solid rgba(0, 229, 255, 0.12);
+      border-radius: var(--radius-sm);
+      color: var(--text-primary);
+      font-size: 1rem;
+      font-family: var(--font-ui);
+      box-sizing: border-box;
+      transition: all 0.25s ease;
+    }
+    .form-group input::placeholder {
+      color: var(--text-muted);
+    }
+    .form-group input:focus {
+      outline: none;
+      border-color: var(--accent-cyan);
+      box-shadow: 0 0 0 3px rgba(0, 229, 255, 0.1), 0 0 20px rgba(0, 229, 255, 0.05);
+      background: rgba(10, 14, 23, 1);
+    }
+
+    /* ── Buttons ── */
+    .btn-block {
+      width: 100%;
+      padding: 14px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      transition: all 0.25s ease;
+    }
+    .btn-primary.btn-block {
+      position: relative;
+      overflow: hidden;
+    }
+    .btn-primary.btn-block::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(135deg, transparent 40%, rgba(255,255,255,0.08) 50%, transparent 60%);
+      transform: translateX(-100%);
+      transition: transform 0.6s ease;
+    }
+    .btn-primary.btn-block:hover:not(:disabled)::after {
+      transform: translateX(100%);
+    }
+
+    /* ── Code input ── */
+    .code-display {
+      font-family: var(--font-mono) !important;
+      font-size: 2rem !important;
+      text-align: center;
+      letter-spacing: 12px;
+      color: var(--accent-cyan) !important;
+      padding: 16px !important;
+    }
+
+    /* ── Status message ── */
+    .status-msg {
+      margin-top: var(--gap-md);
+      font-size: 0.8rem;
+      text-align: center;
+      min-height: 20px;
+      font-family: var(--font-mono);
+    }
+    .error { color: var(--accent-red); }
+    .info  { color: var(--accent-cyan); }
+
+    /* ── Step 2 hidden by default ── */
+    #step2 { display: none; }
+
+    /* ── Instruction text ── */
+    .instruction-text {
+      text-align: center;
+      color: var(--text-secondary);
+      font-size: 0.82rem;
+      margin-bottom: var(--gap-lg);
+      line-height: 1.5;
+      padding: var(--gap-md);
+      border-radius: var(--radius-sm);
+      background: rgba(0, 229, 255, 0.04);
+      border: 1px solid rgba(0, 229, 255, 0.08);
+    }
+
+    /* ── Footer ── */
+    .login-footer {
+      text-align: center;
+      margin-top: var(--gap-lg);
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+    }
+    .login-footer a {
+      color: var(--accent-cyan);
+      text-decoration: none;
+    }
+
+    /* ── Entrance animation ── */
+    .login-container {
+      animation: fadeInUp 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    }
+    @keyframes fadeInUp {
+      from { opacity: 0; transform: translateY(30px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Animated background orbs -->
+  <div class="bg-orb bg-orb--1"></div>
+  <div class="bg-orb bg-orb--2"></div>
+  <div class="bg-orb bg-orb--3"></div>
+
+  <!-- Floating particles -->
+  <canvas id="particlesCanvas"></canvas>
+
+  <div class="login-container">
+
+    <!-- Branding -->
+    <div class="login-brand">
+      <div class="robot-icon">🤖</div>
+      <h1><span>Robotic Arm</span> Control</h1>
+      <p>6-DOF Real-Time Web Interface</p>
+    </div>
+
+    <!-- Login Card -->
+    <div class="card login-card">
+
+      <!-- Admin Authentication -->
+      <div id="step2" style="display: block;">
+        <div class="step-label">Admin Authentication</div>
+        <div class="instruction-text">
+          Enter the secret Admin Token to take control of the server and robotic arm.
+        </div>
+        <div class="form-group">
+          <label for="codeInput" style="text-align: center;">Admin Token</label>
+          <input type="password" id="codeInput" class="code-display" placeholder="••••" autocomplete="off" autofocus>
+        </div>
+        <button class="btn btn-success btn-block" id="btnSubmit">Login as Admin</button>
+      </div>
+
+      <div class="status-msg" id="statusMsg">Connecting to server...</div>
+    </div>
+
+    <div class="login-footer">
+      Secured Access &middot; WebSocket Relay
+    </div>
+  </div>
+
+  <!-- Particle animation script -->
+  <script>
+    (function() {
+      const canvas = document.getElementById('particlesCanvas');
+      const ctx = canvas.getContext('2d');
+      let particles = [];
+      const PARTICLE_COUNT = 60;
+
+      function resize() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+      }
+      resize();
+      window.addEventListener('resize', resize);
+
+      class Particle {
+        constructor() { this.reset(); }
+        reset() {
+          this.x = Math.random() * canvas.width;
+          this.y = Math.random() * canvas.height;
+          this.vx = (Math.random() - 0.5) * 0.3;
+          this.vy = (Math.random() - 0.5) * 0.3;
+          this.radius = Math.random() * 1.5 + 0.5;
+          this.opacity = Math.random() * 0.4 + 0.1;
+        }
+        update() {
+          this.x += this.vx;
+          this.y += this.vy;
+          if (this.x < 0 || this.x > canvas.width) this.vx *= -1;
+          if (this.y < 0 || this.y > canvas.height) this.vy *= -1;
+        }
+        draw() {
+          ctx.beginPath();
+          ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(0, 229, 255, ${this.opacity})`;
+          ctx.fill();
+        }
+      }
+
+      for (let i = 0; i < PARTICLE_COUNT; i++) particles.push(new Particle());
+
+      function drawLines() {
+        for (let i = 0; i < particles.length; i++) {
+          for (let j = i + 1; j < particles.length; j++) {
+            const dx = particles[i].x - particles[j].x;
+            const dy = particles[i].y - particles[j].y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < 120) {
+              ctx.beginPath();
+              ctx.moveTo(particles[i].x, particles[i].y);
+              ctx.lineTo(particles[j].x, particles[j].y);
+              ctx.strokeStyle = `rgba(0, 229, 255, ${0.06 * (1 - dist / 120)})`;
+              ctx.lineWidth = 0.5;
+              ctx.stroke();
+            }
+          }
+        }
+      }
+
+      function animate() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        particles.forEach(p => { p.update(); p.draw(); });
+        drawLines();
+        requestAnimationFrame(animate);
+      }
+      animate();
+    })();
+  </script>
+
+  <script src="admin_login.js?v=3"></script>
+</body>
+</html>

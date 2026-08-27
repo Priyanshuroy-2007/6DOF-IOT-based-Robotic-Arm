@@ -107,17 +107,11 @@ const THROTTLE_MS = 20;           // 50Hz max send rate
  */
 function connect() {
   const urlParams = new URLSearchParams(window.location.search);
-  let token = urlParams.get('token') || sessionStorage.getItem('robotic_arm_token');
+  const token = urlParams.get('token') || sessionStorage.getItem('robotic_arm_token');
   
   if (!token) {
-    window.location.href = '/login.html';
+    window.location.href = '/user_login.html';
     return;
-  }
-
-  // Store in sessionStorage and clean token from URL
-  sessionStorage.setItem('robotic_arm_token', token);
-  if (window.location.search.includes('token=')) {
-    window.history.replaceState({}, document.title, window.location.pathname);
   }
 
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -155,23 +149,6 @@ function connect() {
     wsConnected = false;
     updateConnectionUI(false);
     clearInterval(heartbeatInterval);
-
-    // Safety: Disable physical replay control if disconnected
-    if (typeof stopPlayback === 'function') stopPlayback();
-    if (typeof isRecording !== 'undefined' && isRecording && typeof stopRecording === 'function') stopRecording();
-
-    if (event.code === 4001) {
-      console.warn('[AUTH] Session invalid or expired. Redirecting to login.');
-      sessionStorage.removeItem('robotic_arm_token');
-      window.location.href = '/login.html';
-      return;
-    }
-    if (event.code === 4029) {
-      console.warn('[WS] Rate limit reached. Retrying in 10s...');
-      setTimeout(connect, 10000);
-      return;
-    }
-
     scheduleReconnect();
   };
 
@@ -186,7 +163,7 @@ function connect() {
  * Similar to CAN bus error recovery with increasing retry intervals.
  */
 function scheduleReconnect() {
-  const delay = Math.min(1000 * Math.pow(1.5, reconnectAttempts), MAX_RECONNECT_DELAY);
+  const delay = Math.min(500 * Math.pow(2, reconnectAttempts), MAX_RECONNECT_DELAY);
   reconnectAttempts++;
   console.log(`[WS] Reconnecting in ${delay}ms (attempt ${reconnectAttempts})`);
   setTimeout(connect, delay);
@@ -247,6 +224,19 @@ function handleServerMessage(msg) {
       if (eStopActive) showEstopBanner(true);
       if (userInputLocked) showLockBanner(true);
       break;
+    case 'joint_update':
+      // If we are actively driving, ignore incoming echo to prevent UI jitter
+      // Unless we are locked out by admin, in which case we MUST sync with their updates
+      if (isDriver() && !userInputLocked) {
+        break;
+      }
+      if (msg.data) {
+        Object.assign(jointState, msg.data);
+        syncSlidersFromState();
+        if (typeof joystickLeft !== 'undefined') joystickLeft.updateValuesDisplay();
+        if (typeof joystickRight !== 'undefined') joystickRight.updateValuesDisplay();
+      }
+      break;
 
     case 'driver_assigned':
       currentDriverId = msg.driverId;
@@ -289,7 +279,7 @@ function handleServerMessage(msg) {
     case 'kicked':
       // Admin forcibly logged out this user — redirect to login
       alert('⛔ You have been logged out by the Admin.');
-      window.location.href = '/login.html';
+      window.location.href = '/user_login.html';
       break;
 
     default:
@@ -325,6 +315,8 @@ const DOM = {
   recordingFrameCount: document.getElementById('recordingFrameCount'),
   samplingRate:        document.getElementById('samplingRate'),
   samplingRateValue:   document.getElementById('samplingRateValue'),
+  joystickSensitivity: document.getElementById('joystickSensitivity'),
+  joystickSensitivityValue: document.getElementById('joystickSensitivityValue'),
 };
 
 function updateConnectionUI(connected) {
@@ -342,19 +334,7 @@ function updateConnectionUI(connected) {
 function updateDriverUI() {
   if (!wsConnected) return;
   const driver = isDriver();
-  
-  if (driver) {
-    DOM.spectatorBanner.innerHTML = '🎮 ACCESS GRANTED — YOU HAVE CONTROL';
-    DOM.spectatorBanner.style.borderColor = 'var(--primary-color)';
-    DOM.spectatorBanner.style.background = 'rgba(0, 229, 255, 0.05)';
-    DOM.spectatorBanner.style.color = 'var(--primary-color)';
-  } else {
-    DOM.spectatorBanner.innerHTML = '👀 SPECTATOR MODE — WAITING FOR ADMIN TO GRANT DRIVE ACCESS';
-    DOM.spectatorBanner.style.borderColor = 'var(--warning-color)';
-    DOM.spectatorBanner.style.background = 'rgba(255, 171, 0, 0.05)';
-    DOM.spectatorBanner.style.color = 'var(--warning-color)';
-  }
-
+  DOM.spectatorBanner.classList.toggle('visible', !driver);
   DOM.driverBadge.style.display = driver ? 'inline-flex' : 'none';
   
   // Disable UI elements if not driver or if locked
@@ -532,11 +512,13 @@ class VirtualJoystick {
     this.center = this.size / 2;
     this.outerRadius = this.size / 2 - 10;
     this.knobRadius = 24;
-    this.deadZone = 5; // Pixels of dead zone at center (like ADC noise floor)
+    this.deadZone = 0.05; // Normalized dead zone [0..1]
 
-    // Knob state — current position (analogous to ADC sample buffer)
+    // Knob state — current position and output vectors
     this.knobX = this.center;
     this.knobY = this.center;
+    this.dx = 0; // Normalized X velocity [-1, 1]
+    this.dy = 0; // Normalized Y velocity [-1, 1]
     this.active = false;   // Pointer is down (like a button press flag)
     this.pointerId = null; // Track specific pointer for multi-touch
 
@@ -576,9 +558,7 @@ class VirtualJoystick {
   }
 
   /**
-   * Pointer up — release and spring back to center.
-   * The spring-back is like a mechanical joystick return spring,
-   * or resetting an ADC channel to default sampling.
+   * Pointer up — release and spring back to center immediately.
    */
   onPointerUp(e) {
     if (e.pointerId !== this.pointerId) return;
@@ -586,8 +566,12 @@ class VirtualJoystick {
     this.pointerId = null;
     this.trail = [];
 
-    // Animate spring-back to center
-    this.springBack();
+    // Snap back to center
+    this.knobX = this.center;
+    this.knobY = this.center;
+    this.dx = 0;
+    this.dy = 0;
+    this.render();
   }
 
   /**
@@ -623,103 +607,31 @@ class VirtualJoystick {
       this.trail.shift();
     }
 
-    // Convert to normalized values and update joint state
-    this.updateJointState();
+    // Convert to normalized velocity vectors
+    this.updateVectors();
     this.render();
   }
 
   /**
-   * Map knob position to joint angles.
-   *
-   * Normalized: (position - center) / radius → [-1.0, +1.0]
-   * Then mapped to [0, 180] degrees:
-   *   angle = (normalized + 1.0) / 2.0 * 180
-   *
-   * This mirrors the embedded map() function:
-   *   int map(int x, int in_min, int in_max, int out_min, int out_max) {
-   *     return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
-   *   }
+   * Convert knob position to normalized dx, dy vectors [-1.0, 1.0].
    */
-  updateJointState() {
-    const normalizedX = (this.knobX - this.center) / this.outerRadius;
-    const normalizedY = (this.knobY - this.center) / this.outerRadius;
+  updateVectors() {
+    let nx = (this.knobX - this.center) / this.outerRadius;
+    let ny = (this.knobY - this.center) / this.outerRadius;
 
-    // Apply dead zone (like ADC noise threshold)
-    const applyDeadZone = (val) => {
-      if (Math.abs(val) < this.deadZone / this.outerRadius) return 0;
-      return val;
-    };
+    // Apply dead zone
+    if (Math.abs(nx) < this.deadZone) nx = 0;
+    if (Math.abs(ny) < this.deadZone) ny = 0;
 
-    const dx = applyDeadZone(normalizedX);
-    const dy = applyDeadZone(normalizedY);
-
-    // Map to 0–180° (center = 90°)
-    const xAngle = Math.round((dx + 1.0) * 90);
-    const yAngle = Math.round((dy + 1.0) * 90);
-
-    // Clamp to [0, 180]
-    jointState[this.xKey] = Math.max(0, Math.min(180, xAngle));
-    jointState[this.yKey] = Math.max(0, Math.min(180, yAngle));
-
-    // Update display
-    this.valueDisplay.textContent = `X: ${jointState[this.xKey]}° — Y: ${jointState[this.yKey]}°`;
-
-    // Sync sliders
-    syncSlidersFromState();
-
-    // Send to server (throttled)
-    sendJointState();
+    this.dx = nx;
+    this.dy = ny;
   }
-
   /**
-   * Update knob position visually based on external changes to jointState.
-   * Called when keyboard controls update the angles.
+   * Updates the text display showing the current mapped values.
    */
-  syncKnobFromState() {
-    if (this.active) return; // Don't snap if user is actively dragging
-
-    // Reverse map: [0, 180] -> [-1.0, 1.0] -> canvas coordinates
-    const normalizedX = (jointState[this.xKey] / 90) - 1.0;
-    const normalizedY = (jointState[this.yKey] / 90) - 1.0;
-
-    this.knobX = this.center + (normalizedX * this.outerRadius);
-    this.knobY = this.center + (normalizedY * this.outerRadius);
-
-    // Update display text
+  updateValuesDisplay() {
+    if (!this.valueDisplay) return;
     this.valueDisplay.textContent = `X: ${jointState[this.xKey]}° — Y: ${jointState[this.yKey]}°`;
-
-    this.render();
-  }
-
-  /**
-   * Spring-back animation — smoothly returns knob to center.
-   * Like a servo returning to neutral with exponential decay.
-   */
-  springBack() {
-    const animate = () => {
-      if (this.active) return; // User grabbed again
-
-      const dx = this.center - this.knobX;
-      const dy = this.center - this.knobY;
-
-      if (Math.abs(dx) < 1 && Math.abs(dy) < 1) {
-        this.knobX = this.center;
-        this.knobY = this.center;
-        this.updateJointState();
-        this.render();
-        return;
-      }
-
-      // Exponential decay (like an RC discharge curve)
-      this.knobX += dx * 0.2;
-      this.knobY += dy * 0.2;
-
-      this.updateJointState();
-      this.render();
-      requestAnimationFrame(animate);
-    };
-
-    requestAnimationFrame(animate);
   }
 
   /**
@@ -1167,15 +1079,8 @@ function updateFramesTable() {
       <td>${frame.J4}°</td>
       <td>${frame.J5}°</td>
       <td>${frame.J6}°</td>
+      <td><button class="btn btn-danger btn-sm" onclick="deleteFrame(${frame.index})">✕</button></td>
     `;
-
-    const tdAction = document.createElement('td');
-    const delBtn = document.createElement('button');
-    delBtn.className = 'btn btn-danger btn-sm';
-    delBtn.textContent = '✕';
-    delBtn.addEventListener('click', () => deleteFrame(frame.index));
-    tdAction.appendChild(delBtn);
-    tr.appendChild(tdAction);
 
     DOM.framesBody.appendChild(tr);
   }
@@ -1248,21 +1153,40 @@ function clearFrameHighlights() {
   // 5. Connect WebSocket (like HAL_UART_Init + enabling RX interrupt)
   connect();
 
-  // 6. Keyboard controls for joysticks (Simultaneous multi-key support)
-  const activeKeys = new Set();
-  let currentKeyboardStep = 2;
-  const keyboardSpeedSlider = document.getElementById('keyboardSpeed');
-  const keyboardSpeedValue = document.getElementById('keyboardSpeedValue');
-  
-  if (keyboardSpeedSlider) {
-    keyboardSpeedSlider.addEventListener('input', () => {
-      currentKeyboardStep = parseInt(keyboardSpeedSlider.value);
-      if (keyboardSpeedValue) keyboardSpeedValue.textContent = `${currentKeyboardStep}° / tick`;
-      keyboardSpeedSlider.style.setProperty('--fill', `${((currentKeyboardStep - 1) / 9) * 100}%`);
+  // 6. Joystick Sensitivity Slider
+  if (DOM.joystickSensitivity) {
+    DOM.joystickSensitivity.addEventListener('input', () => {
+      const val = DOM.joystickSensitivity.value;
+      DOM.joystickSensitivityValue.textContent = `${val}° / tick`;
+      DOM.joystickSensitivity.style.setProperty('--fill', `${((val - 1) / 14) * 100}%`);
     });
   }
 
+  // 7. Keyboard controls for joysticks (supports simultaneous keys)
+  const activeKeys = new Set();
+  
+  // Default Button logic
+  const btnUserDefault = document.getElementById('btnUserDefault');
+  if (btnUserDefault) {
+    btnUserDefault.addEventListener('click', () => {
+      if (wsConnected && isDriver() && !userInputLocked && !eStopActive) {
+        jointState.J1 = 90;
+        jointState.J2 = 90;
+        jointState.J3 = 90;
+        jointState.J4 = 90;
+        jointState.J5 = 90;
+        jointState.J6 = 90;
+        sendJointState();
+        syncSlidersFromState();
+        joystickLeft.updateValuesDisplay();
+        joystickRight.updateValuesDisplay();
+      }
+    });
+  }
+  
   window.addEventListener('keydown', (e) => {
+    if (!wsConnected || !isDriver() || userInputLocked || eStopActive) return;
+    
     // Prevent scrolling for arrow keys
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) {
       e.preventDefault();
@@ -1274,41 +1198,67 @@ function clearFrameHighlights() {
     activeKeys.delete(e.key.toLowerCase());
   });
 
-  function processKeyboardInput() {
+  // Loop to apply continuous movement
+  setInterval(() => {
     if (!wsConnected || !isDriver() || userInputLocked || eStopActive) return;
     
+    // Get sensitivity from slider, fallback to 5
+    const step = DOM.joystickSensitivity ? parseInt(DOM.joystickSensitivity.value) : 5; 
     let changed = false;
-    const step = currentKeyboardStep; // Degrees per tick
 
-    // Left Joystick (J1/J2) - WASD Keys
-    if (activeKeys.has('a')) { jointState.J1 = Math.max(0, jointState.J1 - step); changed = true; }
-    if (activeKeys.has('d')) { jointState.J1 = Math.min(180, jointState.J1 + step); changed = true; }
-    if (activeKeys.has('w')) { jointState.J2 = Math.max(0, jointState.J2 - step); changed = true; }
-    if (activeKeys.has('s')) { jointState.J2 = Math.min(180, jointState.J2 + step); changed = true; }
+    // 1. Determine keyboard-driven dx/dy
+    let kLeftDx = 0, kLeftDy = 0, kRightDx = 0, kRightDy = 0;
+    
+    if (activeKeys.size > 0) {
+      if (activeKeys.has('a')) kLeftDx = -1;
+      if (activeKeys.has('d')) kLeftDx = 1;
+      if (activeKeys.has('w')) kLeftDy = -1; // W goes UP visually
+      if (activeKeys.has('s')) kLeftDy = 1;  // S goes DOWN visually
 
-    // Right Joystick (J3/J4) - Arrow Keys
-    if (activeKeys.has('arrowleft')) { jointState.J3 = Math.max(0, jointState.J3 - step); changed = true; }
-    if (activeKeys.has('arrowright')) { jointState.J3 = Math.min(180, jointState.J3 + step); changed = true; }
-    if (activeKeys.has('arrowup')) { jointState.J4 = Math.max(0, jointState.J4 - step); changed = true; }
-    if (activeKeys.has('arrowdown')) { jointState.J4 = Math.min(180, jointState.J4 + step); changed = true; }
+      if (activeKeys.has('arrowleft')) kRightDx = -1;
+      if (activeKeys.has('arrowright')) kRightDx = 1;
+      if (activeKeys.has('arrowup')) kRightDy = -1;
+      if (activeKeys.has('arrowdown')) kRightDy = 1;
+    }
+
+    // 2. Visually update joysticks for keyboard input (if not actively dragged by mouse)
+    if (!joystickLeft.active) {
+      joystickLeft.knobX = joystickLeft.center + (kLeftDx * joystickLeft.outerRadius);
+      joystickLeft.knobY = joystickLeft.center + (kLeftDy * joystickLeft.outerRadius);
+      joystickLeft.render();
+    }
+    
+    if (!joystickRight.active) {
+      joystickRight.knobX = joystickRight.center + (kRightDx * joystickRight.outerRadius);
+      joystickRight.knobY = joystickRight.center + (kRightDy * joystickRight.outerRadius);
+      joystickRight.render();
+    }
+
+    // 3. Calculate final effective dx/dy (mouse overrides keyboard)
+    const effLeftDx = joystickLeft.active ? joystickLeft.dx : kLeftDx;
+    const effLeftDy = joystickLeft.active ? joystickLeft.dy : kLeftDy;
+    const effRightDx = joystickRight.active ? joystickRight.dx : kRightDx;
+    const effRightDy = joystickRight.active ? joystickRight.dy : kRightDy;
+
+    // 4. Apply to jointState
+    if (effLeftDx !== 0) { jointState.J1 = Math.min(180, Math.max(0, jointState.J1 + effLeftDx * step)); changed = true; }
+    if (effLeftDy !== 0) { jointState.J2 = Math.min(180, Math.max(0, jointState.J2 + effLeftDy * step)); changed = true; }
+    if (effRightDx !== 0) { jointState.J3 = Math.min(180, Math.max(0, jointState.J3 + effRightDx * step)); changed = true; }
+    if (effRightDy !== 0) { jointState.J4 = Math.min(180, Math.max(0, jointState.J4 + effRightDy * step)); changed = true; }
 
     if (changed) {
+      // Round everything to integer since PWM deals with integers
+      jointState.J1 = Math.round(jointState.J1);
+      jointState.J2 = Math.round(jointState.J2);
+      jointState.J3 = Math.round(jointState.J3);
+      jointState.J4 = Math.round(jointState.J4);
+
       syncSlidersFromState();
       sendJointState();
-      joystickLeft.syncKnobFromState();
-      joystickRight.syncKnobFromState();
+      joystickLeft.updateValuesDisplay();
+      joystickRight.updateValuesDisplay();
     }
-  }
-
-  // Poll keyboard state at 50Hz
-  setInterval(processKeyboardInput, 20);
-  
-  // Clean up connection on unload to prevent ghost sessions
-  window.addEventListener('beforeunload', () => {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.close(1000, 'Page unloaded');
-    }
-  });
+  }, 50); // 20 times per second
 
   console.log('[BOOT] Init complete — all subsystems online.');
 })();

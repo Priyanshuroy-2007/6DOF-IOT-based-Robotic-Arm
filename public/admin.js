@@ -1125,7 +1125,31 @@ if (btnAdminLogout) {
       if (ws) {
         ws.close(1000, 'Admin logged out');
       }
-      window.location.href = '/login.html';
+      window.location.href = '/admin_login.html';
+    }
+  });
+}
+
+// Admin Header Default Button Handler
+const btnAdminDefault = document.getElementById('btnAdminDefault');
+if (btnAdminDefault) {
+  btnAdminDefault.addEventListener('click', () => {
+    if (wsConnected && userInputLocked && !eStopEngaged) {
+      // Create a clean default state
+      const defaultState = { J1: 90, J2: 90, J3: 90, J4: 90, J5: 90, J6: 90 };
+      
+      // Update local state without triggering const assignment error
+      if (typeof adminJointState !== 'undefined') {
+        Object.assign(adminJointState, defaultState);
+      }
+      
+      // Broadcast to server (acting as an admin sending joint updates)
+      ws.send(JSON.stringify({ type: 'joints', data: defaultState }));
+      logEvent('sys', 'Reset all joints to 90 (Default Position)');
+    } else if (!userInputLocked) {
+      alert('You must enable TAKE OVER to send commands to the arm.');
+    } else if (eStopEngaged) {
+      alert('Cannot reset joints while E-STOP is engaged.');
     }
   });
 }

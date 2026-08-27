@@ -29,27 +29,6 @@ const express = require('express');
 const http = require('http');
 const { WebSocketServer } = require('ws');
 const path = require('path');
-const fs = require('fs');
-const crypto = require('crypto');
-const helmet = require('helmet');
-
-// Load environment variables from .env if present
-try {
-  const envPath = path.join(__dirname, '.env');
-  if (fs.existsSync(envPath)) {
-    const envContent = fs.readFileSync(envPath, 'utf8');
-    for (const line of envContent.split('\n')) {
-      const trimmed = line.trim();
-      if (trimmed && !trimmed.startsWith('#') && trimmed.includes('=')) {
-        const [key, ...rest] = trimmed.split('=');
-        const val = rest.join('=').trim().replace(/^["']|["']$/g, '');
-        if (key.trim() && !process.env[key.trim()]) {
-          process.env[key.trim()] = val;
-        }
-      }
-    }
-  }
-} catch (e) {}
 
 /* ---------------------------------------------------------------------------
  *  Attempt to load serialport. If not installed or on a system without
@@ -70,18 +49,11 @@ try {
  * ========================================================================= */
 const CONFIG = {
   HTTP_PORT:        process.env.PORT || 3000,
-  ADMIN_TOKEN:      process.env.ADMIN_TOKEN || (() => {
-    const randomToken = crypto.randomBytes(16).toString('hex');
-    console.log('\n================================================================');
-    console.log(` 🔑 GENERATED ADMIN TOKEN: ${randomToken}`);
-    console.log(' (Set the ADMIN_TOKEN in .env or environment to persist this)');
-    console.log('================================================================\n');
-    return randomToken;
-  })(),
+  ADMIN_TOKEN:      process.env.ADMIN_TOKEN || 'PR29',
 
   // Watchdog interval & timeout (ms) — maps to STM32 IWDG prescaler/reload
-  WATCHDOG_INTERVAL: 1000,
-  HEARTBEAT_TIMEOUT: 10000,
+  WATCHDOG_INTERVAL: 500,
+  HEARTBEAT_TIMEOUT: 1500,
 
   // Throttle gate — max send rate to serial (50Hz = 20ms period)
   // Like a SysTick-gated output timer on the MCU
@@ -130,7 +102,7 @@ let activeDriverId = null;            // clientId of the single allowed driver
  * Last joint state sent to serial — used for throttle deduplication.
  * Analogous to a shadow register that caches the last DMA write.
  */
-let commandedJointState = { ...CONFIG.NEUTRAL_STATE };
+let lastJointState = { ...CONFIG.NEUTRAL_STATE };
 let lastSerialSendTime = 0;
 
 /**
@@ -168,25 +140,11 @@ let rxTimestamps = [];
  *  EXPRESS HTTP SERVER
  * ========================================================================= */
 const app = express();
-app.use(
-  helmet({
-    contentSecurityPolicy: {
-      directives: {
-        defaultSrc: ["'self'"],
-        scriptSrc: ["'self'", "'unsafe-inline'"],
-        scriptSrcAttr: ["'unsafe-inline'"],
-        styleSrc: ["'self'", "'unsafe-inline'"],
-        imgSrc: ["'self'", "data:", "blob:"],
-        connectSrc: ["'self'", "ws:", "wss:", "http:", "https:"],
-      },
-    },
-  })
-);
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Redirect root to login page
 app.get('/', (req, res) => {
-  res.redirect('/login.html');
+  res.redirect('/user_login.html');
 });
 
 const server = http.createServer(app);
@@ -194,7 +152,7 @@ const server = http.createServer(app);
 /* ===========================================================================
  *  WEBSOCKET SERVER — Role-based connection manager
  * ========================================================================= */
-const wss = new WebSocketServer({ server, maxPayload: 8192 });
+const wss = new WebSocketServer({ server });
 
 /**
  * Generate a unique client ID — like assigning a CAN bus node address.
@@ -213,82 +171,30 @@ function generateClientId() {
  * - Each message = an interrupt firing with payload
  * - Disconnect = peripheral fault / bus error
  */
-const connectionRateLimit = new Map();
-
 wss.on('connection', (ws, req) => {
-  const forwarded = req.headers['x-forwarded-for'];
-  const ip = (forwarded ? forwarded.split(',')[0].trim() : req.socket.remoteAddress) || '127.0.0.1';
-  const now = Date.now();
-  let connRl = connectionRateLimit.get(ip);
-  if (!connRl || now - connRl.windowStart > 60000) {
-    connRl = { count: 0, windowStart: now };
-  }
-  connRl.count++;
-  connectionRateLimit.set(ip, connRl);
-  if (connRl.count > 120) {
-    console.warn(`[SECURITY] Connection rate limit exceeded for IP: ${ip}`);
-    ws.close(4029, 'Too many connections');
-    return;
-  }
-
   const url = new URL(req.url, `http://${req.headers.host}`);
-  const role = url.searchParams.get('role') || '';
+  const role = url.searchParams.get('role') || 'user';
   const token = url.searchParams.get('token') || '';
 
-  if (!['admin', 'user', 'login'].includes(role)) {
-    ws.close(4000, 'Invalid role');
+  /* ---- Role validation (like access control / privilege levels in RTOS) ---- */
+  if (role === 'admin' && token !== CONFIG.ADMIN_TOKEN) {
+    ws.send(JSON.stringify({ type: 'error', message: 'Invalid admin token' }));
+    ws.close(4001, 'Unauthorized');
     return;
-  }
-
-  if (role === 'admin') {
-    if (!token || !CONFIG.ADMIN_TOKEN) {
-      ws.send(JSON.stringify({ type: 'error', message: 'Invalid admin token' }));
-      ws.close(4001, 'Unauthorized');
-      return;
-    }
-    const hash1 = crypto.createHash('sha256').update(token).digest();
-    const hash2 = crypto.createHash('sha256').update(CONFIG.ADMIN_TOKEN).digest();
-    if (!crypto.timingSafeEqual(hash1, hash2)) {
-      ws.send(JSON.stringify({ type: 'error', message: 'Invalid admin token' }));
-      ws.close(4001, 'Unauthorized');
-      return;
-    }
-    // Single admin session policy: notify previous admin before closing
-    for (const [existingWs, info] of clients.entries()) {
-      if (info.role === 'admin' && existingWs !== ws) {
-        console.log(`[ADMIN] Replaced older admin session ${info.id}`);
-        try {
-          existingWs.send(JSON.stringify({ type: 'kicked', reason: 'Another admin session was opened.' }));
-        } catch (e) {}
-        existingWs.close(4001, 'Replaced');
-      }
-    }
   }
   
   if (role === 'user') {
-    const session = validUserTokens.get(token);
-    if (!session || now - session.lastSeen > 12 * 60 * 60 * 1000) {
-      if (session) validUserTokens.delete(token);
+    if (!validUserTokens.has(token)) {
       ws.send(JSON.stringify({ type: 'error', message: 'Invalid or expired user session' }));
       ws.close(4001, 'Unauthorized');
       return;
-    }
-    session.lastSeen = now;
-    
-    for (const [existingWs, info] of clients.entries()) {
-      if (info.role === 'user' && info.token === token && existingWs !== ws) {
-        console.log(`[WS] Replaced older user session for ${info.username}`);
-        try { existingWs.close(4001, 'Replaced by new connection'); } catch (e) {}
-      }
     }
   }
 
   const clientInfo = {
     id: generateClientId(),
     role: role,
-    token: role === 'user' ? token : null,
-    ip: ip,
-    username: role === 'user' ? validUserTokens.get(token).username : (role === 'admin' ? 'Admin' : 'Guest'),
+    username: role === 'user' ? validUserTokens.get(token) : (role === 'admin' ? 'Admin' : 'Guest'),
     lastHeartbeat: Date.now(),
     connectedAt: Date.now(),
     lastSendTime: 0,  // Per-client throttle timestamp
@@ -309,7 +215,7 @@ wss.on('connection', (ws, req) => {
     serialConnected: serialConnected,
     activeDriverId: activeDriverId,
     username: clientInfo.username,
-    jointState: commandedJointState,
+    jointState: lastJointState,
     servoLimits: servoLimits,
     telemetry: getTelemetrySnapshot(),
   }));
@@ -333,11 +239,27 @@ wss.on('connection', (ws, req) => {
 
   /* ---- Disconnect handler ---- */
   ws.on('close', () => {
-    disconnectClient(ws, 'Closed');
+    console.log(`[WS] ${clientInfo.id} (${clientInfo.role}) disconnected`);
+    clients.delete(ws);
+    updateClientCounts();
+    broadcastToRole('admin', { type: 'client_disconnected', clientId: clientInfo.id });
+
+    // If active driver disconnects, release the lock
+    if (clientInfo.id === activeDriverId) {
+      activeDriverId = null;
+      console.log('[SAFETY] Active driver disconnected — revoking access');
+      broadcastToAll({ type: 'driver_assigned', driverId: null });
+    }
+
+    // If all clients disconnected, send neutral to prevent runaway
+    if (clients.size === 0) {
+      console.log('[SAFETY] All clients disconnected — sending neutral state');
+      sendToSerial(formatJointPacket(CONFIG.NEUTRAL_STATE));
+    }
   });
 
   ws.on('error', (err) => {
-    disconnectClient(ws, `Error: ${err.message}`);
+    console.error(`[WS] Error on ${clientInfo.id}:`, err.message);
   });
 
   // Notify admins of new connection
@@ -348,48 +270,6 @@ wss.on('connection', (ws, req) => {
     connectedClients: getClientList(),
   });
 });
-
-function disconnectClient(ws, reason) {
-  const info = clients.get(ws);
-  if (!info) return;
-
-  console.log(`[WS] ${info.id} (${info.role}) disconnected - ${reason}`);
-
-  clients.delete(ws);
-  updateClientCounts();
-  broadcastToRole('admin', {
-    type: 'client_disconnected',
-    clientId: info.id,
-    connectedClients: getClientList(),
-  });
-
-  if (info.id === activeDriverId) {
-    activeDriverId = null;
-    console.log('[SAFETY] Active driver disconnected — revoking access');
-    broadcastToAll({ type: 'driver_assigned', driverId: null });
-  }
-
-  if (clients.size === 0) {
-    console.log('[SAFETY] All clients disconnected — sending neutral state');
-    sendToSerial(formatJointPacket(CONFIG.NEUTRAL_STATE));
-  }
-}
-
-const requestAccessRateLimit = new Map();
-
-setInterval(() => {
-  const now = Date.now();
-  for (const [username, req] of activeAuthRequests.entries()) {
-    if (now > req.expiresAt) {
-      activeAuthRequests.delete(username);
-    }
-  }
-  for (const [token, session] of validUserTokens.entries()) {
-    if (now - session.lastSeen > 12 * 60 * 60 * 1000) {
-      validUserTokens.delete(token);
-    }
-  }
-}, 60 * 1000);
 
 /* ===========================================================================
  *  MESSAGE ROUTER — Priority multiplexer
@@ -411,75 +291,46 @@ function routeMessage(ws, clientInfo, msg) {
       if (clientInfo.role === 'login') {
         const username = msg.username;
         if (!username) return;
-
-        const ip = clientInfo.ip;
-        const now = Date.now();
-        let rl = requestAccessRateLimit.get(ip);
-        if (!rl || now - rl.windowStart > 60000) {
-          rl = { count: 0, windowStart: now };
-        }
-        rl.count++;
-        requestAccessRateLimit.set(ip, rl);
-        if (rl.count > 5) {
-          ws.send(JSON.stringify({ type: 'auth_fail', message: 'Too many requests. Try again later.' }));
-          return;
-        }
-
-        // Generate 4-digit cryptographically secure OTP
-        const code = crypto.randomInt(1000, 10000).toString();
-        // 3-minute expiry
-        activeAuthRequests.set(username, { code, expiresAt: Date.now() + 3 * 60 * 1000, attempts: 0 });
+        const code = Math.floor(1000 + Math.random() * 9000).toString(); // 4 digits
+        activeAuthRequests.set(username, { code, expiresAt: Date.now() + 10 * 60 * 1000 });
         
         console.log(`[AUTH] Request from ${username}, code: ${code}`);
         // Broadcast to admins to display in the dashboard
         broadcastToRole('admin', { type: 'auth_request', username: username, code: code });
-      } else {
-        return; // reject unauthenticated
       }
       break;
 
     case 'submit_code':
       if (clientInfo.role === 'login') {
+        
+        // --- ADMIN BYPASS ---
+        if (msg.username.trim().toLowerCase() === 'priyanshu' && msg.code === CONFIG.ADMIN_TOKEN) {
+          ws.send(JSON.stringify({ type: 'auth_success', token: CONFIG.ADMIN_TOKEN, role: 'admin' }));
+          console.log(`[AUTH] Admin ${msg.username} authenticated successfully.`);
+          // If there was a pending code for this user, clear it
+          activeAuthRequests.delete(msg.username);
+          return;
+        }
+
         const req = activeAuthRequests.get(msg.username);
-        if (req && Date.now() < req.expiresAt) {
-          req.attempts = (req.attempts || 0) + 1;
-          if (req.attempts > 5) {
-            activeAuthRequests.delete(msg.username);
-            ws.send(JSON.stringify({ type: 'auth_fail', message: 'Too many attempts. Request a new code.' }));
-            return;
-          }
-          if (req.code === msg.code) {
-            activeAuthRequests.delete(msg.username);
-            const sessionToken = 'usr_' + crypto.randomBytes(16).toString('hex');
-            validUserTokens.set(sessionToken, { username: msg.username, lastSeen: Date.now() });
-            ws.send(JSON.stringify({ type: 'auth_success', token: sessionToken }));
-            console.log(`[AUTH] User ${msg.username} authenticated successfully.`);
-          } else {
-            ws.send(JSON.stringify({ type: 'auth_fail', message: `Invalid code. Attempts left: ${5 - req.attempts}` }));
-          }
+        if (req && req.code === msg.code && Date.now() < req.expiresAt) {
+          activeAuthRequests.delete(msg.username);
+          const sessionToken = 'usr_' + Math.random().toString(36).substr(2, 12);
+          validUserTokens.set(sessionToken, msg.username);
+          ws.send(JSON.stringify({ type: 'auth_success', token: sessionToken }));
+          console.log(`[AUTH] User ${msg.username} authenticated successfully.`);
         } else {
           ws.send(JSON.stringify({ type: 'auth_fail', message: 'Invalid or expired code.' }));
         }
-      } else {
-        return; // reject unauthenticated
       }
       break;
 
     /* ---- Joint state update from user ---- */
-    case 'joints': {
-      // 1) Universal safety latch
-      if (eStopActive) {
-        ws.send(JSON.stringify({ type: 'estop_active', message: 'E-STOP engaged' }));
-        return;
-      }
-
-      // 2) Role-based auth and rate-limiting
-      if (clientInfo.role === 'admin') {
-        // Admins bypass driver lock unconditionally
-      } else if (clientInfo.role === 'user') {
+    case 'joints':
+      if (clientInfo.role === 'user') {
         // Only active driver can send joints
         if (activeDriverId !== clientInfo.id) {
-          return; // Silently drop
+          return; // Silently drop (handled client-side mostly)
         }
         
         // Check if user input is locked by admin
@@ -487,38 +338,30 @@ function routeMessage(ws, clientInfo, msg) {
           ws.send(JSON.stringify({ type: 'locked', message: 'Admin has locked user input' }));
           return;
         }
-      } else {
-        // Unauthenticated or 'login' roles are rejected
-        return;
-      }
-
-      // Input validation (reject invalid payloads)
-      if (!msg.data || typeof msg.data !== 'object') return;
-      const joints = ['J1', 'J2', 'J3', 'J4', 'J5', 'J6'];
-      for (const j of joints) {
-        const val = msg.data[j];
-        if (typeof val !== 'number' || !Number.isFinite(val) || val < 0 || val > 180) {
-          return; // Drop packet entirely if invalid
+        // Check E-STOP
+        if (eStopActive) {
+          ws.send(JSON.stringify({ type: 'estop_active', message: 'E-STOP engaged' }));
+          return;
         }
-      }
 
-      // Throttle gate — like a timer-gated output (applies to admin & user)
-      const now = Date.now();
-      if (now - clientInfo.lastSendTime < CONFIG.THROTTLE_INTERVAL) {
-        return; // Drop packet (rate limited)
+        // Throttle gate — like a timer-gated output
+        const now = Date.now();
+        if (now - clientInfo.lastSendTime < CONFIG.THROTTLE_INTERVAL) {
+          return; // Drop packet (rate limited)
+        }
+        clientInfo.lastSendTime = now;
       }
-      clientInfo.lastSendTime = now;
 
       // Clamp values to calibration limits (like PWM compare register bounds)
       const clamped = clampJointState(msg.data);
-      commandedJointState = clamped;
+      lastJointState = clamped;
 
       // Format and send to serial
       const packet = formatJointPacket(clamped);
       sendToSerial(packet);
 
-      // Broadcast to all admins for monitoring
-      broadcastToRole('admin', {
+      // Broadcast to all clients for monitoring and syncing UI
+      broadcastToAll({
         type: 'joint_update',
         source: clientInfo.id,
         sourceRole: clientInfo.role,
@@ -526,7 +369,11 @@ function routeMessage(ws, clientInfo, msg) {
         raw: packet,
       });
       break;
-    }
+
+    /* ---- Command messages ---- */
+    case 'command':
+      handleCommand(ws, clientInfo, msg);
+      break;
 
     /* ---- E-STOP (admin only) ---- */
     case 'estop':
@@ -540,7 +387,7 @@ function routeMessage(ws, clientInfo, msg) {
         const neutralPacket = formatJointPacket(CONFIG.NEUTRAL_STATE);
         sendToSerial(neutralPacket);
         sendToSerial('<CMD:ESTOP>\n');
-        commandedJointState = { ...CONFIG.NEUTRAL_STATE };
+        lastJointState = { ...CONFIG.NEUTRAL_STATE };
       }
 
       // Broadcast E-STOP state to ALL clients
@@ -581,12 +428,6 @@ function routeMessage(ws, clientInfo, msg) {
       for (const [clientWs, info] of clients.entries()) {
         if (info.id === targetId) {
           console.log(`[ADMIN] Logging out client ${info.id} (${info.username || info.role}) — by ${clientInfo.id}`);
-          
-          // Cleanup valid token so they can't reconnect
-          if (info.token) {
-            validUserTokens.delete(info.token);
-          }
-
           if (activeDriverId === info.id) {
             activeDriverId = null;
             broadcastToAll({ type: 'driver_assigned', driverId: null });
@@ -594,8 +435,8 @@ function routeMessage(ws, clientInfo, msg) {
           try {
             clientWs.send(JSON.stringify({ type: 'kicked', reason: 'You have been logged out by the Admin.' }));
           } catch(e) {}
-          clientWs.close(4001, 'Logged out by admin');
-          disconnectClient(clientWs, 'Logged out by admin');
+          // Small delay so message is sent before closing
+          setTimeout(() => clientWs.close(1000, 'Logged out by admin'), 200);
           kicked = true;
           break;
         }
@@ -627,6 +468,52 @@ function routeMessage(ws, clientInfo, msg) {
     default:
       console.warn(`[WS] Unknown message type: ${msg.type} from ${clientInfo.id}`);
   }
+}
+
+/* ===========================================================================
+ *  COMMAND HANDLER
+ * ========================================================================= */
+function handleCommand(ws, clientInfo, msg) {
+  const cmd = msg.command;
+  let serialCmd = '';
+
+  switch (cmd) {
+    case 'RECORD':
+      serialCmd = '<CMD:RECORD>\n';
+      break;
+    case 'PLAY':
+      serialCmd = '<CMD:PLAY>\n';
+      break;
+    case 'STOP':
+      serialCmd = '<CMD:STOP>\n';
+      break;
+    case 'LOOP':
+      serialCmd = '<CMD:LOOP>\n';
+      break;
+    case 'PAUSE':
+      serialCmd = '<CMD:PAUSE>\n';
+      break;
+    case 'CLEAR':
+      serialCmd = '<CMD:CLEAR>\n';
+      break;
+    case 'SPEED':
+      serialCmd = `<CMD:SPEED:${Math.round(msg.value || 50)}>\n`;
+      break;
+    default:
+      console.warn(`[CMD] Unknown command: ${cmd}`);
+      return;
+  }
+
+  sendToSerial(serialCmd);
+
+  // Echo command to admin console
+  broadcastToRole('admin', {
+    type: 'command_sent',
+    command: cmd,
+    source: clientInfo.id,
+    sourceRole: clientInfo.role,
+    raw: serialCmd.trim(),
+  });
 }
 
 /* ===========================================================================
@@ -774,47 +661,20 @@ function closeSerial() {
  * If serial is not connected, the packet is silently dropped
  * (like writing to a disconnected peripheral — data goes to /dev/null).
  */
-let pendingSerialData = null;
-let serialDrainPending = false;
-
 function sendToSerial(data) {
-  if (!serialPortInstance || !serialPortInstance.isOpen) {
-    telemetry.packetsSentToSerial++;
-    txTimestamps.push(Date.now());
-    logTx(data);
-    return;
-  }
-
-  if (serialDrainPending) {
-    pendingSerialData = data;
-    return;
-  }
-
-  const canWrite = serialPortInstance.write(data, (err) => {
-    if (err) {
-      console.error('[SERIAL] TX error:', err.message);
-      broadcastToRole('admin', { type: 'serial_error', error: err.message });
-    }
-  });
-
-  if (!canWrite) {
-    serialDrainPending = true;
-    serialPortInstance.once('drain', () => {
-      serialDrainPending = false;
-      if (pendingSerialData) {
-        const nextData = pendingSerialData;
-        pendingSerialData = null;
-        sendToSerial(nextData);
+  if (serialPortInstance && serialPortInstance.isOpen) {
+    serialPortInstance.write(data, (err) => {
+      if (err) {
+        console.error('[SERIAL] TX error:', err.message);
+        broadcastToRole('admin', { type: 'serial_error', error: err.message });
       }
     });
+
+    telemetry.packetsSentToSerial++;
+    txTimestamps.push(Date.now());
   }
 
-  telemetry.packetsSentToSerial++;
-  txTimestamps.push(Date.now());
-  logTx(data);
-}
-
-function logTx(data) {
+  // Always log TX to admin console (even if serial disconnected)
   console.log(`[SERIAL TX] ${data.trim()}`); // Print to terminal
   broadcastToRole('admin', {
     type: 'serial_tx',
@@ -838,12 +698,7 @@ function logTx(data) {
  *  4. Apply values to PWM output compare registers
  */
 function formatJointPacket(joints) {
-  const inner = `J1:${joints.J1},J2:${joints.J2},J3:${joints.J3},J4:${joints.J4},J5:${joints.J5},J6:${joints.J6}`;
-  let checksum = 0;
-  for (let i = 0; i < inner.length; i++) {
-    checksum ^= inner.charCodeAt(i);
-  }
-  return `<${inner}*${checksum.toString(16).toUpperCase().padStart(2, '0')}>\n`;
+  return `<J1:${joints.J1},J2:${joints.J2},J3:${joints.J3},J4:${joints.J4},J5:${joints.J5},J6:${joints.J6}>\n`;
 }
 
 /**
@@ -867,43 +722,25 @@ function clampJointState(joints) {
  *  CALIBRATION HANDLER
  * ========================================================================= */
 function handleCalibration(ws, msg) {
-  if (!msg.limits || typeof msg.limits !== 'object') return;
-  
-  let valid = true;
-  for (const key of ['J1', 'J2', 'J3', 'J4', 'J5', 'J6']) {
-    if (msg.limits[key]) {
-      const min = parseInt(msg.limits[key].min);
-      const max = parseInt(msg.limits[key].max);
-      if (isNaN(min) || isNaN(max) || min < 0 || max > 180 || min > max) {
-        valid = false;
-        break;
+  if (msg.limits) {
+    for (const key of ['J1', 'J2', 'J3', 'J4', 'J5', 'J6']) {
+      if (msg.limits[key]) {
+        servoLimits[key] = {
+          min: Math.max(0, parseInt(msg.limits[key].min) || 0),
+          max: Math.min(180, parseInt(msg.limits[key].max) || 180),
+        };
       }
     }
+    console.log('[CALIBRATION] Updated servo limits:', JSON.stringify(servoLimits));
+
+    // Broadcast new limits to all clients
+    broadcastToAll({
+      type: 'calibration_updated',
+      limits: servoLimits,
+    });
+
+    ws.send(JSON.stringify({ type: 'calibration_ack', limits: servoLimits }));
   }
-
-  if (!valid) {
-    console.warn('[CALIBRATION] Invalid calibration limits received');
-    return;
-  }
-
-  for (const key of ['J1', 'J2', 'J3', 'J4', 'J5', 'J6']) {
-    if (msg.limits[key]) {
-      servoLimits[key] = {
-        min: parseInt(msg.limits[key].min),
-        max: parseInt(msg.limits[key].max),
-      };
-    }
-  }
-
-  console.log('[CALIBRATION] Updated servo limits:', JSON.stringify(servoLimits));
-
-  // Broadcast new limits to all clients
-  broadcastToAll({
-    type: 'calibration_updated',
-    limits: servoLimits,
-  });
-
-  ws.send(JSON.stringify({ type: 'calibration_ack', limits: servoLimits }));
 }
 
 /* ===========================================================================
@@ -987,11 +824,11 @@ setInterval(() => {
 
   /* ---- Check heartbeats ---- */
   for (const [ws, info] of clients) {
-    const timeout = info.role === 'login' ? 60000 : CONFIG.HEARTBEAT_TIMEOUT;
-    if (now - info.lastHeartbeat > timeout) {
-      console.warn(`[WATCHDOG] ${info.id} (${info.role}) heartbeat timeout — disconnecting`);
+    if (now - info.lastHeartbeat > CONFIG.HEARTBEAT_TIMEOUT) {
+      console.warn(`[WATCHDOG] ${info.id} heartbeat timeout — disconnecting`);
       ws.close(4002, 'Heartbeat timeout');
-      disconnectClient(ws, 'Heartbeat timeout');
+      clients.delete(ws);
+      updateClientCounts();
     }
   }
 
