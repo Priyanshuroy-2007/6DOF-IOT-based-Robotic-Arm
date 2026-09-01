@@ -29,6 +29,8 @@ const express = require('express');
 const http = require('http');
 const { WebSocketServer } = require('ws');
 const path = require('path');
+const crypto = require('crypto');
+const helmet = require('helmet');
 
 /* ---------------------------------------------------------------------------
  *  Attempt to load serialport. If not installed or on a system without
@@ -49,7 +51,13 @@ try {
  * ========================================================================= */
 const CONFIG = {
   HTTP_PORT:        process.env.PORT || 3000,
-  ADMIN_TOKEN:      process.env.ADMIN_TOKEN || 'PR29',
+  ADMIN_TOKEN:      (() => {
+    const t = process.env.ADMIN_TOKEN;
+    if (!t) throw new Error('[CONFIG] ADMIN_TOKEN must be set in .env — refusing to start.');
+    return t;
+  })(),
+  MAX_CONNECTIONS_PER_IP: 10,   // Max simultaneous WS connections per IP (DoS guard)
+  MAX_AUTH_ATTEMPTS:      5,    // Failed code attempts before invalidating a pending request
 
   // Watchdog interval & timeout (ms) — maps to STM32 IWDG prescaler/reload
   WATCHDOG_INTERVAL: 1000,
@@ -94,8 +102,9 @@ let serialConnected = false;       // Serial port open state
 let serialPortInstance = null;     // Active SerialPort object
 let serialParser = null;           // Line parser for incoming UART data
 
-const activeAuthRequests = new Map(); // username -> { code, expiresAt }
-const validUserTokens = new Map();    // token -> username
+const activeAuthRequests = new Map(); // username -> { code, expiresAt, attempts }
+const validUserTokens = new Map();    // token -> { username, expiresAt }
+const connectionsByIP = new Map();    // ip -> connection count (DoS guard)
 let activeDriverId = null;            // clientId of the single allowed driver
 
 /**
@@ -140,6 +149,7 @@ let rxTimestamps = [];
  *  EXPRESS HTTP SERVER
  * ========================================================================= */
 const app = express();
+app.use(helmet());    // FIX #4: Apply all HTTP security headers
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Redirect root to login page
@@ -175,17 +185,38 @@ wss.on('connection', (ws, req) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const role = url.searchParams.get('role') || 'user';
   const token = url.searchParams.get('token') || '';
+  const ip = req.socket.remoteAddress || 'unknown';
+
+  /* ---- FIX #11: Role allowlist — reject unknown roles immediately ---- */
+  const VALID_ROLES = ['admin', 'user', 'login'];
+  if (!VALID_ROLES.includes(role)) {
+    ws.close(4000, 'Invalid role');
+    return;
+  }
+
+  /* ---- FIX #7: Per-IP connection rate limit (DoS guard) ---- */
+  const ipCount = connectionsByIP.get(ip) || 0;
+  if (ipCount >= CONFIG.MAX_CONNECTIONS_PER_IP) {
+    ws.close(4003, 'Too many connections from this IP');
+    return;
+  }
+  connectionsByIP.set(ip, ipCount + 1);
 
   /* ---- Role validation (like access control / privilege levels in RTOS) ---- */
   if (role === 'admin' && token !== CONFIG.ADMIN_TOKEN) {
     ws.send(JSON.stringify({ type: 'error', message: 'Invalid admin token' }));
+    connectionsByIP.set(ip, (connectionsByIP.get(ip) || 1) - 1);
     ws.close(4001, 'Unauthorized');
     return;
   }
   
   if (role === 'user') {
-    if (!validUserTokens.has(token)) {
+    /* ---- FIX #12: Check token TTL in addition to existence ---- */
+    const tokenData = validUserTokens.get(token);
+    if (!tokenData || Date.now() > tokenData.expiresAt) {
+      if (tokenData) validUserTokens.delete(token); // purge expired entry
       ws.send(JSON.stringify({ type: 'error', message: 'Invalid or expired user session' }));
+      connectionsByIP.set(ip, (connectionsByIP.get(ip) || 1) - 1);
       ws.close(4001, 'Unauthorized');
       return;
     }
@@ -194,7 +225,8 @@ wss.on('connection', (ws, req) => {
   const clientInfo = {
     id: generateClientId(),
     role: role,
-    username: role === 'user' ? validUserTokens.get(token) : (role === 'admin' ? 'Admin' : 'Guest'),
+    ip: ip,
+    username: role === 'user' ? validUserTokens.get(token)?.username : (role === 'admin' ? 'Admin' : 'Guest'),
     lastHeartbeat: Date.now(),
     connectedAt: Date.now(),
     lastSendTime: 0,  // Per-client throttle timestamp
@@ -244,6 +276,11 @@ wss.on('connection', (ws, req) => {
     updateClientCounts();
     broadcastToRole('admin', { type: 'client_disconnected', clientId: clientInfo.id });
 
+    // FIX #7: Decrement per-IP connection counter
+    const remaining = (connectionsByIP.get(clientInfo.ip) || 1) - 1;
+    if (remaining <= 0) connectionsByIP.delete(clientInfo.ip);
+    else connectionsByIP.set(clientInfo.ip, remaining);
+
     // If active driver disconnects, release the lock
     if (clientInfo.id === activeDriverId) {
       activeDriverId = null;
@@ -289,10 +326,20 @@ function routeMessage(ws, clientInfo, msg) {
     /* ---- Login Auth Flow ---- */
     case 'request_access':
       if (clientInfo.role === 'login') {
-        const username = msg.username;
+        // FIX #6: Sanitize and length-cap username
+        const username = (typeof msg.username === 'string' ? msg.username : '').trim().slice(0, 32);
         if (!username) return;
-        const code = Math.floor(1000 + Math.random() * 9000).toString(); // 4 digits
-        activeAuthRequests.set(username, { code, expiresAt: Date.now() + 10 * 60 * 1000 });
+
+        // FIX #7: Anti-spam — reject if a non-expired request already exists
+        const existing = activeAuthRequests.get(username);
+        if (existing && Date.now() < existing.expiresAt) {
+          ws.send(JSON.stringify({ type: 'error', message: 'You already have a pending access request. Please wait.' }));
+          return;
+        }
+
+        // FIX #13: Use 6-digit code for higher entropy
+        const code = (100000 + Math.floor(Math.random() * 900000)).toString();
+        activeAuthRequests.set(username, { code, expiresAt: Date.now() + 10 * 60 * 1000, attempts: 0 });
         
         console.log(`[AUTH] Request from ${username}, code: ${code}`);
         // Broadcast to admins to display in the dashboard
@@ -302,23 +349,43 @@ function routeMessage(ws, clientInfo, msg) {
 
     case 'submit_code':
       if (clientInfo.role === 'login') {
-        
-        // --- ADMIN BYPASS ---
-        if (msg.username.trim().toLowerCase() === 'priyanshu' && msg.code === CONFIG.ADMIN_TOKEN) {
+        const submitCode = (typeof msg.code === 'string' ? msg.code : '').trim();
+
+        // FIX #1: Admin auth — check token only, no hardcoded username
+        if (submitCode === CONFIG.ADMIN_TOKEN) {
           ws.send(JSON.stringify({ type: 'auth_success', token: CONFIG.ADMIN_TOKEN, role: 'admin' }));
-          console.log(`[AUTH] Admin ${msg.username} authenticated successfully.`);
-          // If there was a pending code for this user, clear it
-          activeAuthRequests.delete(msg.username);
+          console.log('[AUTH] Admin authenticated successfully.');
+          activeAuthRequests.delete(msg.username || '');
           return;
         }
 
-        const req = activeAuthRequests.get(msg.username);
-        if (req && req.code === msg.code && Date.now() < req.expiresAt) {
-          activeAuthRequests.delete(msg.username);
-          const sessionToken = 'usr_' + Math.random().toString(36).substr(2, 12);
-          validUserTokens.set(sessionToken, msg.username);
+        // FIX #6: Sanitize username
+        const submitUsername = (typeof msg.username === 'string' ? msg.username : '').trim().slice(0, 32);
+        if (!submitUsername) { ws.send(JSON.stringify({ type: 'auth_fail', message: 'Missing username.' })); break; }
+
+        const authReq = activeAuthRequests.get(submitUsername);
+        if (!authReq) {
+          ws.send(JSON.stringify({ type: 'auth_fail', message: 'No pending request. Please request access first.' }));
+          break;
+        }
+
+        // FIX #2 / #13: Brute-force guard — max attempts per request
+        authReq.attempts = (authReq.attempts || 0) + 1;
+        if (authReq.attempts > CONFIG.MAX_AUTH_ATTEMPTS) {
+          activeAuthRequests.delete(submitUsername);
+          ws.send(JSON.stringify({ type: 'auth_fail', message: 'Too many attempts. Request cancelled.' }));
+          console.warn(`[AUTH] Too many attempts for ${submitUsername} — invalidating request`);
+          break;
+        }
+
+        if (authReq.code === submitCode && Date.now() < authReq.expiresAt) {
+          activeAuthRequests.delete(submitUsername);
+          // FIX #9: Cryptographically secure session token with 24h TTL
+          const sessionToken = crypto.randomBytes(32).toString('hex');
+          const TOKEN_TTL = 24 * 60 * 60 * 1000; // 24 hours
+          validUserTokens.set(sessionToken, { username: submitUsername, expiresAt: Date.now() + TOKEN_TTL });
           ws.send(JSON.stringify({ type: 'auth_success', token: sessionToken }));
-          console.log(`[AUTH] User ${msg.username} authenticated successfully.`);
+          console.log(`[AUTH] User ${submitUsername} authenticated successfully.`);
         } else {
           ws.send(JSON.stringify({ type: 'auth_fail', message: 'Invalid or expired code.' }));
         }
@@ -496,9 +563,12 @@ function handleCommand(ws, clientInfo, msg) {
     case 'CLEAR':
       serialCmd = '<CMD:CLEAR>\n';
       break;
-    case 'SPEED':
-      serialCmd = `<CMD:SPEED:${Math.round(msg.value || 50)}>\n`;
+    case 'SPEED': {
+      // FIX #6: Clamp speed to valid range before embedding in serial packet
+      const speed = Math.max(0, Math.min(100, Math.round(Number(msg.value) || 50)));
+      serialCmd = `<CMD:SPEED:${speed}>`+'\n';
       break;
+    }
     default:
       console.warn(`[CMD] Unknown command: ${cmd}`);
       return;
@@ -573,11 +643,13 @@ function handleSerialConfig(ws, msg) {
   }
 
   if (action === 'connect') {
-    const portPath = msg.port;
-    const baudRate = parseInt(msg.baud) || CONFIG.DEFAULT_BAUD;
+    const portPath = typeof msg.port === 'string' ? msg.port.trim() : '';
+    const baudRate = Math.min(1000000, Math.max(300, parseInt(msg.baud) || CONFIG.DEFAULT_BAUD));
 
-    if (!portPath) {
-      ws.send(JSON.stringify({ type: 'serial_status', connected: false, error: 'No port specified' }));
+    // FIX #6: Allowlist serial port paths — prevent path traversal / injection
+    const validPortPath = /^(\/dev\/tty[A-Za-z0-9.]+|COM\d{1,3})$/.test(portPath);
+    if (!portPath || !validPortPath) {
+      ws.send(JSON.stringify({ type: 'serial_status', connected: false, error: 'Invalid or missing port path' }));
       return;
     }
 
@@ -803,7 +875,8 @@ function getTelemetrySnapshot() {
     servoLimits,
     uptimeSeconds: Math.floor((Date.now() - telemetry.uptime) / 1000),
     connectedClients: getClientList(),
-    activeAuthRequests: Array.from(activeAuthRequests.entries()).map(([u, d]) => ({ username: u, code: d.code })),
+    // FIX #3: Never include the raw auth code in telemetry — just the username
+    activeAuthRequests: Array.from(activeAuthRequests.keys()).map(u => ({ username: u })),
   };
 }
 
@@ -832,6 +905,16 @@ setInterval(() => {
     }
   }
 
+  /* ---- FIX #12: Purge expired user tokens (memory leak prevention) ---- */
+  for (const [tok, data] of validUserTokens) {
+    if (now > data.expiresAt) validUserTokens.delete(tok);
+  }
+
+  /* ---- FIX #12: Purge stale auth requests ---- */
+  for (const [user, data] of activeAuthRequests) {
+    if (now > data.expiresAt) activeAuthRequests.delete(user);
+  }
+
   /* ---- Calculate TX/RX rates (packets per second) ---- */
   const oneSecAgo = now - 1000;
   txTimestamps = txTimestamps.filter(t => t > oneSecAgo);
@@ -857,7 +940,8 @@ server.listen(CONFIG.HTTP_PORT, () => {
   console.log('╠══════════════════════════════════════════════════════════╣');
   console.log(`║   HTTP  → http://localhost:${CONFIG.HTTP_PORT}                      ║`);
   console.log(`║   User  → http://localhost:${CONFIG.HTTP_PORT}/user.html             ║`);
-  console.log(`║   Admin → http://localhost:${CONFIG.HTTP_PORT}/admin.html?token=${CONFIG.ADMIN_TOKEN}  ║`);
+  // FIX #5: Never print the admin token in logs
+  console.log(`║   Admin → http://localhost:${CONFIG.HTTP_PORT}/admin_login.html                  ║`);
   console.log('╠══════════════════════════════════════════════════════════╣');
   console.log(`║   Throttle: ${1000 / CONFIG.THROTTLE_INTERVAL}Hz  |  Watchdog: ${CONFIG.HEARTBEAT_TIMEOUT}ms timeout    ║`);
   console.log('╚══════════════════════════════════════════════════════════╝');

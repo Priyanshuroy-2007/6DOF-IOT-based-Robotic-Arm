@@ -77,7 +77,6 @@ DOM.btnSubmit.addEventListener('click', () => {
   if (ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({
       type: 'submit_code',
-      username: 'Priyanshu',
       code: code
     }));
     DOM.statusMsg.textContent = 'Verifying...';
