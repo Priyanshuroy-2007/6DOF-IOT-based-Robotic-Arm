@@ -7,447 +7,534 @@
   <title>Robotic Arm — Admin Dashboard</title>
   <link rel="stylesheet" href="styles.css">
   <style>
-    /* ─── Admin: viewport-fit layout ─── */
+    /* ═══════════════════════════════════════════════════════════════════
+     *  ADMIN DASHBOARD — Premium Dark Theme (Image Replica)
+     * ═══════════════════════════════════════════════════════════════════ */
 
-    html, body { height: 100%; }
+    :root {
+      --accent-cyan:      #00e5ff;
+      --accent-cyan-dim:  rgba(0, 229, 255, 0.1);
+      --accent-green:     #10b981;
+      --accent-red:       #ef4444;
+      --accent-yellow:    #f59e0b;
+      
+      --bg-app:           #111827;
+      --bg-card:          #1f2937;
+      --bg-input:         #111827;
+      --bg-active:        rgba(0, 229, 255, 0.1);
+      
+      --border-subtle:    #374151;
+      --border-active:    #4b5563;
+      
+      --text-main:        #f3f4f6;
+      --text-muted:       #9ca3af;
+    }
 
-    /* Scale base font down so everything breathes on a standard 1080p display */
-    html { font-size: 13px; }
+    html, body { height: 100%; margin: 0; }
+    html { font-size: 14px; }
+
+    body {
+      background-color: var(--bg-app);
+      color: var(--text-main);
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    }
 
     .app-container {
       max-width: 100%;
-      padding: 10px 14px;
+      padding: 12px 16px;
       min-height: 100vh;
       box-sizing: border-box;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
     }
 
-    /* ── Header ── */
+    /* ─────────────────────────────────────────────────────────────────
+     *  HEADER
+     * ───────────────────────────────────────────────────────────────── */
     .admin-header {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 10px 20px;
-      margin-bottom: 10px;
+      padding: 12px 20px;
       background: var(--bg-card);
-      border: 1px solid var(--border-subtle);
-      border-radius: var(--radius-lg);
-      backdrop-filter: blur(16px);
-      -webkit-backdrop-filter: blur(16px);
-      box-shadow: var(--shadow-card);
-      gap: 12px;
+      border-radius: 8px;
     }
-    .header-left  { display: flex; align-items: center; gap: 16px; }
-    .header-center{ display: flex; align-items: center; gap: 10px; }
-    .header-right { display: flex; align-items: center; gap: 16px; }
+    .header-left { display: flex; align-items: center; gap: 12px; }
+    .header-title { font-size: 1.1rem; font-weight: 700; color: var(--accent-cyan); letter-spacing: 1px; display: flex; align-items: center; gap: 8px; }
+    .header-subtitle { font-size: 0.7rem; color: var(--text-muted); }
+    
+    .header-center { display: flex; align-items: center; gap: 16px; }
+    .status-pill {
+      border: 1px solid var(--accent-green);
+      color: var(--accent-green);
+      background: rgba(16, 185, 129, 0.1);
+      padding: 4px 12px;
+      border-radius: 16px;
+      font-size: 0.75rem;
+      display: flex; align-items: center; gap: 6px;
+    }
+    .status-pill .dot { width: 6px; height: 6px; background: var(--accent-green); border-radius: 50%; box-shadow: 0 0 6px var(--accent-green); }
+    
+    .badge-cyan {
+      background: var(--accent-cyan); color: #000; padding: 4px 10px; border-radius: 16px; font-size: 0.75rem; font-weight: 600;
+    }
 
-    /* ── Takeover button ── */
-    .takeover-btn {
-      width: 110px; height: 110px;
-      border-radius: 50%;
-      background: radial-gradient(circle at 30% 30%, #29b6f6, #0288d1, #01579b);
-      border: 3px solid #0288d1;
-      color: #fff;
-      font-family: var(--font-mono);
-      font-size: 0.65rem;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 1px;
+    .header-right { display: flex; align-items: center; gap: 12px; font-size: 0.8rem; }
+    .user-profile { display: flex; align-items: center; gap: 6px; color: var(--text-muted); }
+    
+    .btn-header {
+      background: transparent;
+      border: 1px solid;
+      padding: 4px 12px;
+      border-radius: 16px;
+      font-size: 0.7rem;
+      font-weight: 600;
       cursor: pointer;
-      transition: all var(--transition-med);
-      box-shadow: 0 0 0 4px rgba(2, 136, 209, 0.15), 0 0 16px rgba(2, 136, 209, 0.3);
-      display: flex; flex-direction: column; align-items: center; justify-content: center;
-      gap: 4px; line-height: 1.2; user-select: none; flex-shrink: 0;
+      display: flex; align-items: center; gap: 6px;
     }
-    .takeover-btn:hover  { transform: scale(1.05); box-shadow: 0 0 0 6px rgba(2,136,209,0.25), 0 0 30px rgba(2,136,209,0.4); }
-    .takeover-btn:active { transform: scale(0.95); }
-    .takeover-btn.engaged {
-      background: radial-gradient(circle at 30% 30%, #ffab00, #ff8f00, #e65100);
-      border-color: #ff8f00;
-      animation: takeover-pulse 1.5s ease infinite;
-    }
-    @keyframes takeover-pulse {
-      0%, 100% { box-shadow: 0 0 0 4px rgba(255,143,0,0.2), 0 0 20px rgba(255,143,0,0.3); }
-      50%       { box-shadow: 0 0 0 8px rgba(255,143,0,0.35), 0 0 40px rgba(255,143,0,0.5); }
-    }
+    .btn-header.default { border-color: var(--accent-cyan); color: var(--accent-cyan); }
+    .btn-header.logout { border-color: var(--accent-red); color: var(--accent-red); }
 
-    /* ── E-STOP (compact) ── */
-    .estop-btn-sm {
-      width: 110px; height: 110px;
-      border-radius: 50%;
-      background: radial-gradient(circle at 30% 30%, #ff6b3d, #ff3d00, #cc3100);
-      border: 3px solid #ff3d00;
-      color: #fff;
-      font-family: var(--font-mono);
-      font-size: 0.65rem;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 1px;
-      cursor: pointer;
-      transition: all var(--transition-med);
-      box-shadow: 0 0 0 4px rgba(255,61,0,0.15), 0 0 16px rgba(255,61,0,0.3);
-      display: flex; flex-direction: column; align-items: center; justify-content: center;
-      gap: 4px; line-height: 1.2; user-select: none; flex-shrink: 0;
-    }
-    .estop-btn-sm:hover  { transform: scale(1.05); box-shadow: 0 0 0 6px rgba(255,61,0,0.25), 0 0 30px rgba(255,61,0,0.5); }
-    .estop-btn-sm:active { transform: scale(0.95); }
-    .estop-btn-sm.engaged { animation: estop-sm-pulse 1s ease infinite; }
-    .estop-btn-sm.engaged:hover { background: radial-gradient(circle at 30% 30%, #ff8a65, #ff5722, #d84315); }
-    @keyframes estop-sm-pulse {
-      0%, 100% { box-shadow: 0 0 0 4px rgba(255,61,0,0.3), 0 0 20px rgba(255,61,0,0.4); }
-      50%       { box-shadow: 0 0 0 8px rgba(255,61,0,0.5), 0 0 40px rgba(255,61,0,0.6); }
-    }
-
-    /* ── Main two-column grid ── */
+    /* ─────────────────────────────────────────────────────────────────
+     *  GRID LAYOUT
+     * ───────────────────────────────────────────────────────────────── */
     .admin-grid {
       display: grid;
-      grid-template-columns: 280px 1fr;
-      gap: 10px;
-      margin-bottom: 10px;
+      grid-template-columns: 480px 1fr;
+      gap: 12px;
       align-items: start;
     }
-    .sidebar   { display: flex; flex-direction: column; gap: 10px; }
-    .main-area { display: flex; flex-direction: column; gap: 10px; }
+    .col-left, .col-right { display: flex; flex-direction: column; gap: 12px; }
 
-    /* ── Bottom row ── */
-    .admin-bottom {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 10px;
+    /* ─────────────────────────────────────────────────────────────────
+     *  CARDS
+     * ───────────────────────────────────────────────────────────────── */
+    .card {
+      background: var(--bg-card);
+      border-radius: 8px;
+      padding: 16px;
+    }
+    .card-title {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--text-main);
+      margin-bottom: 16px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      display: flex; align-items: center; gap: 8px;
     }
 
-    /* ── Cards: tighter padding ── */
-    .card { padding: 12px 14px; }
-    .card-title { margin-bottom: 8px; font-size: 0.78rem; }
-
-    /* ── Stats grid ── */
-    .stats-grid {
+    /* ─────────────────────────────────────────────────────────────────
+     *  CURRENT JOINT STATE
+     * ───────────────────────────────────────────────────────────────── */
+    .joint-readout-grid {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 6px;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 8px;
     }
-    .stat-card {
+    .joint-stat {
       background: var(--bg-input);
       border: 1px solid var(--border-subtle);
-      border-radius: var(--radius-md);
-      padding: 6px 8px;
+      border-radius: 6px;
+      padding: 12px 0;
       text-align: center;
+      display: flex; flex-direction: column; gap: 4px;
     }
-    .stat-card .stat-number {
-      font-family: var(--font-mono);
-      font-size: 1.1rem;
-      font-weight: 700;
-      color: var(--accent-cyan);
-      display: block;
-    }
-    .stat-card .stat-desc {
-      font-size: 0.58rem;
-      color: var(--text-muted);
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-    }
+    .joint-stat .val { color: var(--accent-cyan); font-size: 1.2rem; font-weight: 700; font-family: monospace; }
+    .joint-stat .lbl { color: var(--text-muted); font-size: 0.6rem; text-transform: uppercase; letter-spacing: 1px; display: flex; align-items: center; justify-content: center; gap: 4px; }
 
-    /* ── Serial config form ── */
-    .serial-form { display: flex; flex-direction: column; gap: 8px; }
-    .serial-form-row { display: flex; align-items: center; gap: 6px; }
-    .serial-form-row label {
-      font-family: var(--font-mono);
-      font-size: 0.68rem;
-      color: var(--text-secondary);
-      min-width: 44px;
-      text-transform: uppercase;
-    }
-    .serial-form-row .select-input,
-    .serial-form-row .text-input { flex: 1; padding: 5px 8px; font-size: 0.75rem; }
-
-    /* ── Console header ── */
-    .console-header {
-      display: flex; justify-content: space-between; align-items: center;
-      margin-bottom: 6px;
-    }
-    .console-filters { display: flex; gap: 4px; }
-    .console-filters .btn { padding: 2px 7px; font-size: 0.58rem; }
-
-    /* ── Client list ── */
-    .client-list { display: flex; flex-direction: column; gap: 4px; }
+    /* ─────────────────────────────────────────────────────────────────
+     *  CLIENTS
+     * ───────────────────────────────────────────────────────────────── */
+    .client-list { display: flex; flex-direction: column; gap: 6px; }
     .client-item {
       display: flex; align-items: center; justify-content: space-between;
-      padding: 5px 10px;
+      padding: 8px 12px;
       background: var(--bg-input);
-      border-radius: var(--radius-sm);
+      border-radius: 6px;
+      font-size: 0.8rem;
+    }
+    .client-item.selected { background: #1e3a8a; } /* Blue highlight from image */
+    .client-info { display: flex; align-items: center; gap: 8px; }
+    .client-actions { display: flex; align-items: center; gap: 6px; }
+    
+    .badge-admin { background: rgba(245, 158, 11, 0.2); color: var(--accent-yellow); padding: 2px 8px; border-radius: 12px; font-size: 0.65rem; border: 1px solid var(--accent-yellow); }
+    .badge-user { background: rgba(16, 185, 129, 0.2); color: var(--accent-green); padding: 2px 8px; border-radius: 12px; font-size: 0.65rem; border: 1px solid var(--accent-green); }
+
+    .btn-outline {
+      background: transparent; border: 1px solid; padding: 4px 12px; border-radius: 16px;
+      font-size: 0.65rem; font-weight: 600; cursor: pointer; text-transform: uppercase;
+    }
+    .btn-outline.green { border-color: var(--accent-green); color: var(--accent-green); }
+    .btn-outline.red { border-color: var(--accent-red); color: var(--accent-red); }
+    .btn-outline.cyan { border-color: var(--accent-cyan); color: var(--accent-cyan); }
+
+    /* ─────────────────────────────────────────────────────────────────
+     *  HARDWARE CONFIG (Side-by-side)
+     * ───────────────────────────────────────────────────────────────── */
+    .hardware-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+    .hw-col { display: flex; flex-direction: column; gap: 12px; }
+    .hw-title { font-size: 0.7rem; color: var(--text-main); font-weight: 600; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
+    
+    .hw-row { display: flex; align-items: center; gap: 8px; }
+    .hw-row label { width: 50px; font-size: 0.65rem; color: var(--text-muted); text-transform: uppercase; }
+    .hw-input { flex: 1; background: var(--bg-input); border: 1px solid var(--border-subtle); color: white; padding: 6px 10px; border-radius: 4px; font-size: 0.75rem; }
+    
+    .led-badge { border: 1px solid var(--accent-green); color: var(--accent-green); padding: 2px 8px; border-radius: 12px; font-size: 0.6rem; display: flex; align-items: center; gap: 4px; }
+    .led-badge .dot { width: 6px; height: 6px; background: var(--accent-green); border-radius: 50%; }
+
+    .cal-row { display: flex; align-items: center; justify-content: space-between; font-size: 0.65rem; color: var(--text-muted); padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
+    .cal-row input { width: 40px; background: var(--bg-input); border: none; color: white; text-align: center; font-size: 0.7rem; padding: 2px; }
+    .cal-lbl { width: 70px; display: flex; align-items: center; gap: 6px; color: var(--text-main); }
+
+    /* ─────────────────────────────────────────────────────────────────
+     *  RIGHT PANEL: JOYSTICK & TOP BUTTONS
+     * ───────────────────────────────────────────────────────────────── */
+    .top-actions {
+      display: flex; justify-content: flex-end; gap: 12px; margin-bottom: 20px;
+    }
+    .status-box {
+      background: var(--bg-input);
+      border: 1px solid;
+      border-radius: 8px;
+      padding: 8px 16px;
+      display: flex; align-items: center; gap: 12px;
+      min-width: 220px;
+    }
+    .status-box.red { border-color: rgba(239, 68, 68, 0.5); }
+    .status-box.yellow { border-color: rgba(245, 158, 11, 0.5); }
+    
+    .status-icon.red { font-size: 1.5rem; background: radial-gradient(circle, #ef4444, #991b1b); border-radius: 50%; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 10px rgba(239, 68, 68, 0.5); }
+    .status-icon.yellow { font-size: 1.2rem; color: var(--accent-yellow); }
+    
+    .status-text { display: flex; flex-direction: column; }
+    .status-text .title { font-size: 0.75rem; font-weight: 700; color: var(--text-main); }
+    .status-text .sub { font-size: 0.6rem; color: var(--text-muted); }
+    .status-box.yellow .status-text .title { color: var(--text-main); }
+    .status-box.yellow .status-text .sub { color: var(--accent-yellow); }
+
+    /* ─────────────────────────────────────────────────────────────────
+     *  JOYSTICKS & STATS (Plain text stats)
+     * ───────────────────────────────────────────────────────────────── */
+    .joy-area {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0 20px;
+    }
+    
+    .joy-wrap { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+    .joy-lbl { color: var(--text-muted); font-size: 0.7rem; font-family: monospace; }
+    
+    .center-stats {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      gap: 30px;
+      align-items: center;
+    }
+    .stat-col { display: flex; flex-direction: column; gap: 24px; }
+    .plain-stat { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+    .plain-stat .val { color: var(--accent-cyan); font-size: 1.2rem; font-weight: 700; font-family: monospace; }
+    .plain-stat .lbl { color: var(--text-muted); font-size: 0.6rem; text-transform: uppercase; letter-spacing: 1px; }
+    
+    .main-btns { display: flex; flex-direction: column; gap: 20px; }
+    
+    .btn-circle {
+      width: 100px; height: 100px;
+      border-radius: 50%;
+      border: 4px solid;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      font-size: 0.7rem; font-weight: 700; color: white; cursor: pointer;
+    }
+    .btn-circle.estop {
+      border-color: #7f1d1d;
+      background: radial-gradient(circle at 30% 30%, #ef4444, #b91c1c);
+      box-shadow: 0 0 20px rgba(239, 68, 68, 0.4);
+    }
+    .btn-circle.takeover {
+      border-color: #0c4a6e;
+      background: radial-gradient(circle at 30% 30%, #38bdf8, #0284c7);
+      box-shadow: 0 0 20px rgba(56, 189, 248, 0.2);
+    }
+    .btn-circle i { font-size: 1.5rem; margin-bottom: 4px; font-style: normal; }
+
+    /* ─────────────────────────────────────────────────────────────────
+     *  CONSOLE TABS
+     * ───────────────────────────────────────────────────────────────── */
+    .console-header {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 12px;
+    }
+    .tabs { display: flex; gap: 20px; }
+    .tab { font-size: 0.7rem; font-weight: 600; color: var(--text-muted); cursor: pointer; padding-bottom: 4px; border-bottom: 2px solid transparent; text-transform: uppercase; }
+    .tab.active { color: var(--accent-cyan); border-bottom-color: var(--accent-cyan); }
+    
+    .console-filters { display: flex; gap: 8px; }
+    .console-filters .btn-outline { padding: 2px 10px; font-size: 0.6rem; }
+    
+    .console-window {
+      background: #0a0e17;
+      border-radius: 6px;
+      padding: 12px;
+      height: 180px;
+      overflow-y: auto;
+      font-family: monospace;
+      font-size: 0.7rem;
       border: 1px solid var(--border-subtle);
     }
-    .client-item .client-id {
-      font-family: var(--font-mono);
-      font-size: 0.68rem;
-      color: var(--text-primary);
-    }
-
-    /* ── Log panels: fixed compact height ── */
-    .console-output { max-height: 130px !important; font-size: 0.7rem; }
-
-    /* ── Section divider ── */
-    .section-divider { border: none; border-top: 1px solid var(--border-subtle); margin: 8px 0; }
-
-    /* ── Joystick preview area ── */
-    .preview-grid { display: flex; gap: 12px; justify-content: center; }
-
-    /* ── Inputs & buttons ── */
-    .btn { padding: 5px 12px; font-size: 0.72rem; }
-    .btn-sm { padding: 3px 8px; font-size: 0.64rem; }
-    select.select-input { font-size: 0.75rem; }
-
-    /* ── Speed control slider ── */
-    .speed-control { margin-bottom: 8px; }
-    .speed-control .slider-label { font-size: 0.68rem; }
-
-    /* ── Hidden hint (used by JS internally) ── */
+    
+    /* ── Helper utilities for JS logic ── */
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
     .estop-hint { display: none; }
 
-    /* ── Responsive breakpoints ── */
-    @media (max-width: 1100px) {
-      .admin-grid { grid-template-columns: 1fr; }
-      .admin-bottom { grid-template-columns: 1fr; }
+    /* ─────────────────────────────────────────────────────────────────
+     *  RESPONSIVE SCALING
+     * ───────────────────────────────────────────────────────────────── */
+    @media (max-width: 1400px) {
+      .center-stats { gap: 16px; }
+      .admin-grid { grid-template-columns: 420px 1fr; }
     }
-    @media (max-width: 640px) {
-      html { font-size: 11px; }
-      .admin-header { flex-wrap: wrap; justify-content: center; }
-      .stats-grid { grid-template-columns: repeat(2, 1fr); }
+    
+    @media (max-width: 1200px) {
+      .admin-grid { grid-template-columns: 1fr; }
+      .col-left, .col-right { gap: 12px; }
+      .top-actions { justify-content: flex-start; }
+      .joy-area { padding: 0 10px; }
+    }
+    
+    @media (max-width: 850px) {
+      .joint-readout-grid { grid-template-columns: repeat(3, 1fr); gap: 10px; }
+      .hardware-grid { grid-template-columns: 1fr; }
+      .joy-area { flex-direction: column; gap: 30px; }
+      .center-stats { grid-template-columns: 1fr 1fr 1fr; gap: 20px; width: 100%; justify-items: center; }
+      .stat-col { gap: 12px; }
+      .main-btns { flex-direction: row; gap: 20px; }
+    }
+
+    @media (max-width: 600px) {
+      .admin-header { flex-direction: column; gap: 12px; align-items: stretch; }
+      .header-center { justify-content: space-between; }
+      .header-right { justify-content: space-between; }
+      
+      .top-actions { flex-direction: column; gap: 8px; }
+      .status-box { width: 100%; min-width: unset; }
+      
+      .center-stats { grid-template-columns: 1fr; gap: 24px; }
+      .main-btns { flex-direction: column; }
+      .stat-col { flex-direction: row; justify-content: center; gap: 16px; flex-wrap: wrap; }
+      
+      .console-header { flex-direction: column; gap: 12px; align-items: flex-start; }
+      .tabs { flex-wrap: wrap; gap: 12px; }
+      .console-filters { flex-wrap: wrap; }
     }
   </style>
-
 </head>
 <body>
   <div class="app-container">
 
-    <!-- ═══════════════════════════ HEADER BAR ═══════════════════════════ -->
+    <!-- ═══════════════════════════ HEADER ═══════════════════════════ -->
     <div class="admin-header" id="header">
       <div class="header-left">
-        <div>
-          <div class="header-title">⚙️ Admin Dashboard</div>
-          <div class="header-subtitle">Telemetry &amp; Hardware Bridge</div>
-        </div>
+        <div class="header-title">⚙️ ADMIN DASHBOARD</div>
+        <div class="header-subtitle">Telemetry &amp; Hardware Bridge</div>
       </div>
       <div class="header-center">
         <div class="status-pill disconnected" id="statusPill">
           <span class="dot"></span>
           <span id="statusText">Disconnected</span>
         </div>
-        <span class="badge badge-cyan" id="latencyBadge" style="display:none;">
-          <span id="latencyValue">--</span>ms
-        </span>
-        <span class="badge badge-green" id="uptimeBadge" style="display:none;">
+        <div class="badge-cyan" id="uptimeBadge" style="display:none;">
           Uptime: <span id="uptimeValue">0s</span>
-        </span>
+        </div>
+        <div class="badge-cyan" id="latencyBadge" style="display:none;">
+          <span id="latencyValue">--</span>ms
+        </div>
       </div>
       <div class="header-right">
-        <button class="btn btn-sm btn-primary" id="btnAdminDefault" title="Reset all joints to 90" style="font-size: 0.75rem; padding: 6px 14px; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; margin-right: 8px;">
-          <span>🎯</span> Default
-        </button>
-        <button class="btn btn-sm btn-danger" id="btnAdminLogout" title="Logout from Admin Dashboard" style="font-size: 0.75rem; padding: 6px 14px; display: inline-flex; align-items: center; gap: 6px; cursor: pointer;">
-          <span>🚪</span> Logout
-        </button>
+        <div class="user-profile">👤 Admin_Priyanshu ⌄</div>
+        <button class="btn-header default" id="btnAdminDefault"><span style="font-size:0.6rem">🎯</span> DEFAULT</button>
+        <button class="btn-header logout" id="btnAdminLogout"><span style="font-size:0.6rem">🚪</span> LOGOUT</button>
       </div>
-      <!-- Hidden hint used by JS -->
       <span class="estop-hint" id="estopHint"></span>
     </div>
 
-    <!-- ═══════════════════ MAIN TWO-COLUMN GRID ═══════════════════ -->
+    <!-- ═══════════════════════════ GRID ═══════════════════════════ -->
     <div class="admin-grid">
 
-      <!-- ────────── LEFT SIDEBAR: Clients & Serial ────────── -->
-      <div class="sidebar">
-
-        <!-- Access Requests -->
+      <!-- ═══════════════════ LEFT COLUMN ═══════════════════ -->
+      <div class="col-left">
+        
+        <!-- JOINT STATE -->
         <div class="card">
-          <div class="card-title"><span class="icon">🔑</span> Access Requests</div>
-          <div class="client-list" id="authRequestsList">
-            <div style="color: var(--text-muted); font-size: 0.72rem; font-family: var(--font-mono);">No pending requests</div>
+          <div class="card-title">🦾 CURRENT JOINT STATE</div>
+          <div id="jointReadout" class="joint-readout-grid">
+            <!-- Filled by JS -->
           </div>
         </div>
 
-        <!-- Connected Clients -->
+        <!-- CLIENTS -->
         <div class="card">
-          <div class="card-title"><span class="icon">👥</span> Connected Clients</div>
+          <div class="card-title">👥 ACCESS REQUESTS &amp; CONNECTED CLIENTS</div>
+          
+          <div style="font-size:0.65rem; color:var(--text-muted); margin-bottom:8px; text-transform:uppercase;">Pending Requests</div>
+          <div class="client-list" id="authRequestsList" style="margin-bottom:16px;">
+            <div style="color:var(--text-muted); font-size:0.7rem;">No pending requests</div>
+          </div>
+          
+          <div style="font-size:0.65rem; color:var(--text-muted); margin-bottom:8px; text-transform:uppercase;">Connected Clients</div>
           <div class="client-list" id="clientList">
-            <div style="color: var(--text-muted); font-size: 0.72rem; font-family: var(--font-mono);">No clients connected</div>
+            <div style="color:var(--text-muted); font-size:0.7rem;">No clients connected</div>
           </div>
         </div>
 
-        <!-- Serial Bridge Manager -->
+        <!-- HARDWARE -->
         <div class="card">
-          <div class="card-title"><span class="icon">🔌</span> Serial Bridge Manager</div>
-          <div class="serial-form" id="serialForm">
-            <div class="serial-form-row">
-              <label>Port</label>
-              <select class="select-input" id="serialPort" style="flex:1;">
-                <option value="">— Select Port —</option>
-              </select>
-              <button class="btn btn-sm" id="btnRefreshPorts" title="Refresh port list">🔄</button>
+          <div class="card-title">🔧 HARDWARE CONFIGURATION &amp; SAFETY LIMITS</div>
+          <div class="hardware-grid">
+            
+            <div class="hw-col">
+              <div class="hw-title">SERIAL BRIDGE</div>
+              <div class="hw-row">
+                <label>PORT</label>
+                <select class="hw-input" id="serialPort"><option value="">- Select Port -</option></select>
+                <button class="btn-outline" style="border:none;" id="btnRefreshPorts">🔄</button>
+              </div>
+              <div class="hw-row">
+                <label>BAUD</label>
+                <select class="hw-input" id="serialBaud">
+                  <option value="115200" selected>115200</option>
+                </select>
+              </div>
+              <div class="hw-row" style="margin: 4px 0;">
+                <label style="width:auto; margin-right:8px;">HEARTBEAT LED</label>
+                <div class="led-badge" id="serialStatusBadge"><span class="dot" id="serialHeartbeat"></span> OFFLINE</div>
+              </div>
+              <div class="hw-row" style="margin-top:4px;">
+                <button class="btn-outline green" id="btnSerialConnect" style="flex:1;">⚡ CONNECT SERIAL</button>
+                <button class="btn-outline red" id="btnSerialDisconnect" style="flex:1;">⚡ DISCONNECT</button>
+              </div>
             </div>
-            <div class="serial-form-row">
-              <label>Baud</label>
-              <select class="select-input" id="serialBaud" style="flex:1;">
-                <option value="9600">9600</option>
-                <option value="19200">19200</option>
-                <option value="38400">38400</option>
-                <option value="57600">57600</option>
-                <option value="115200" selected>115200</option>
-                <option value="230400">230400</option>
-                <option value="460800">460800</option>
-                <option value="921600">921600</option>
-              </select>
+
+            <div class="hw-col">
+              <div class="hw-title">SAFETY LIMITS</div>
+              <div id="calibrationPanel"></div>
+              <div class="hw-row" style="margin-top:8px;">
+                <button class="btn-outline cyan" id="btnApplyCalibration">✅ APPLY LIMITS</button>
+                <button class="btn-outline" style="border:none; color:var(--text-muted);" id="btnResetCalibration">↩ RESET TO DEFAULTS</button>
+              </div>
             </div>
-            <div class="serial-form-row">
-              <button class="btn btn-success" id="btnSerialConnect" style="flex:1;">⚡ Connect</button>
-              <button class="btn btn-danger" id="btnSerialDisconnect" style="flex:1;" disabled>⏏ Disconnect</button>
-            </div>
-            <div class="serial-form-row">
-              <span class="toggle-label">Hardware Heartbeat</span>
-              <div class="heartbeat-led" id="serialHeartbeat"></div>
-              <span class="badge badge-red" id="serialStatusBadge">OFFLINE</span>
-            </div>
+
           </div>
         </div>
+
       </div>
 
-      <!-- ────────── RIGHT MAIN AREA: State + Joysticks + Telemetry ────────── -->
-      <div class="main-area">
+      <!-- ═══════════════════ RIGHT COLUMN ═══════════════════ -->
+      <div class="col-right">
 
-        <!-- Joint State -->
-        <div class="card">
-          <div class="card-title"><span class="icon">🦾</span> Current Joint State</div>
-          <div id="jointReadout" style="display: grid; grid-template-columns: repeat(6, 1fr); gap: var(--gap-sm);"></div>
-        </div>
-
-        <!-- Joystick + Telemetry + Controls unified panel -->
-        <div class="card">
-          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; flex-wrap:wrap; gap:6px;">
-            <div class="card-title" style="margin:0;"><span class="icon">🎮</span> Joystick Control / Preview</div>
-            <div class="card-title" style="margin:0; color:var(--text-secondary);"><span class="icon">📊</span> Live Telemetry</div>
-            <!-- Keyboard Speed Slider — shown when takeover active -->
-            <div class="speed-control" id="adminKeyboardSpeedControl" style="margin:0; display:none; align-items:center; gap:6px;">
-              <span class="slider-label" style="white-space:nowrap;">KB Speed</span>
-              <input type="range" id="keyboardSpeed" min="1" max="10" value="2" style="--fill:11%; width:80px;">
-              <span class="slider-value" id="keyboardSpeedValue">2° / tick</span>
+        <!-- CONTROL CENTER -->
+        <div class="card" style="flex:1;">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+            <div class="card-title">🎮 JOINT &amp; JOYSTICK CONTROL CENTER / LIVE TELEMETRY</div>
+            
+            <div style="display:flex; gap:12px; align-items:center;">
+              <div id="adminKeyboardSpeedControl" style="display:none; align-items:center; gap:6px; font-size:0.65rem; color:var(--text-muted);">
+                KB Speed
+                <input type="range" id="keyboardSpeed" min="1" max="10" value="2" style="width:60px;">
+                <span id="keyboardSpeedValue">2° / tick</span>
+              </div>
+              <div class="top-actions" style="margin-bottom:0;">
+                <div class="status-box red" id="btnEstopHoriz">
+                  <div class="status-icon red">🔴</div>
+                  <div class="status-text">
+                    <span class="title">EMERGENCY STOP</span>
+                    <span class="sub" id="estopHorizLabel">ENGAGE</span>
+                  </div>
+                </div>
+                <div class="status-box yellow" id="btnLockHoriz">
+                  <div class="status-icon yellow">⚡</div>
+                  <div class="status-text">
+                    <span class="title">USER INPUT LOCKED</span>
+                    <span class="sub" id="lockHorizLabel">(TAKEOVER ACTIVE)</span>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 
-          <!-- 5-column: Left Joy | Left Stats | Centre Controls | Right Stats | Right Joy -->
-          <div style="display:grid; grid-template-columns:auto 1fr auto 1fr auto; align-items:center; gap:20px;">
-
-            <!-- Left Joystick -->
-            <div style="display:flex; flex-direction:column; align-items:center; gap:4px;">
-              <span style="font-size:0.58rem; color:var(--text-muted); font-family:var(--font-mono); text-transform:uppercase; letter-spacing:1px;">WASD</span>
-              <canvas id="previewLeft" width="240" height="240"></canvas>
-              <span style="font-size:0.55rem; color:var(--text-muted); font-family:var(--font-mono);">J1 / J2</span>
+          <div class="joy-area">
+            <div class="joy-wrap">
+              <span class="joy-lbl">WASD</span>
+              <canvas id="previewLeft" width="200" height="200"></canvas>
+              <span class="joy-lbl">J1 / J2</span>
             </div>
-
-            <!-- Left stats column (3 cards) -->
-            <div style="display:flex; flex-direction:column; gap:6px; align-self:stretch; justify-content:center;">
-              <div class="stat-card" style="flex:1; display:flex; flex-direction:column; justify-content:center; align-items:center; padding:5px;">
-                <span class="stat-number" id="statTxRate" style="font-size:1rem;">0</span>
-                <span class="stat-desc" style="font-size:0.55rem; text-align:center;">TX Rate</span>
+            
+            <div class="center-stats">
+              <div class="stat-col">
+                <div class="plain-stat"><span class="val" id="statTxRate">0</span><span class="lbl">TX RATE</span></div>
+                <div class="plain-stat"><span class="val" id="statTxTotal">0</span><span class="lbl">TOTAL TX</span></div>
+                <div class="plain-stat"><span class="val" id="statUsers">0</span><span class="lbl">USERS ONLINE</span></div>
               </div>
-              <div class="stat-card" style="flex:1; display:flex; flex-direction:column; justify-content:center; align-items:center; padding:5px;">
-                <span class="stat-number" id="statTxTotal" style="font-size:1rem;">0</span>
-                <span class="stat-desc" style="font-size:0.55rem; text-align:center;">Total TX</span>
+              
+              <div class="main-btns">
+                <button class="btn-circle estop" id="btnEstop"><i>⛔</i>E-STOP</button>
+                <button class="btn-circle takeover" id="toggleLockUsers"><i>🔄</i>TAKE<br>OVER</button>
               </div>
-              <div class="stat-card" style="flex:1; display:flex; flex-direction:column; justify-content:center; align-items:center; padding:5px;">
-                <span class="stat-number" id="statUsers" style="font-size:1rem;">0</span>
-                <span class="stat-desc" style="font-size:0.55rem; text-align:center;">Users Online</span>
-              </div>
-            </div>
-
-            <!-- Centre: E-STOP (top) + Takeover (bottom) -->
-            <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; align-self:stretch;">
-              <button class="estop-btn-sm" id="btnEstop">
-                <span style="font-size:2.2rem;">⛔</span>
-                E-STOP
-              </button>
-              <button class="takeover-btn" id="toggleLockUsers">
-                <span style="font-size:2.2rem;">⚡</span>
-                TAKE<br>OVER
-              </button>
-            </div>
-
-            <!-- Right stats column (3 cards) -->
-            <div style="display:flex; flex-direction:column; gap:6px; align-self:stretch; justify-content:center;">
-              <div class="stat-card" style="flex:1; display:flex; flex-direction:column; justify-content:center; align-items:center; padding:5px;">
-                <span class="stat-number" id="statRxRate" style="font-size:1rem;">0</span>
-                <span class="stat-desc" style="font-size:0.55rem; text-align:center;">RX Rate</span>
-              </div>
-              <div class="stat-card" style="flex:1; display:flex; flex-direction:column; justify-content:center; align-items:center; padding:5px;">
-                <span class="stat-number" id="statRxTotal" style="font-size:1rem;">0</span>
-                <span class="stat-desc" style="font-size:0.55rem; text-align:center;">Total RX</span>
-              </div>
-              <div class="stat-card" style="flex:1; display:flex; flex-direction:column; justify-content:center; align-items:center; padding:5px;">
-                <span class="stat-number" id="statAdmins" style="font-size:1rem;">0</span>
-                <span class="stat-desc" style="font-size:0.55rem; text-align:center;">Admins Online</span>
+              
+              <div class="stat-col">
+                <div class="plain-stat"><span class="val" id="statRxRate">0</span><span class="lbl">RX RATE</span></div>
+                <div class="plain-stat"><span class="val" id="statRxTotal">0</span><span class="lbl">TOTAL RX</span></div>
+                <div class="plain-stat"><span class="val" id="statAdmins">0</span><span class="lbl">ADMINS ONLINE</span></div>
               </div>
             </div>
-
-            <!-- Right Joystick -->
-            <div style="display:flex; flex-direction:column; align-items:center; gap:4px;">
-              <span style="font-size:0.58rem; color:var(--text-muted); font-family:var(--font-mono); text-transform:uppercase; letter-spacing:1px;">ARROWS</span>
-              <canvas id="previewRight" width="240" height="240"></canvas>
-              <span style="font-size:0.55rem; color:var(--text-muted); font-family:var(--font-mono);">J3 / J4</span>
+            
+            <div class="joy-wrap">
+              <span class="joy-lbl">ARROWS</span>
+              <canvas id="previewRight" width="200" height="200"></canvas>
+              <span class="joy-lbl">J3 / J4</span>
             </div>
-
           </div>
+          
         </div>
-      </div>
-    </div>
 
-
-
-
-
-    <!-- ═══════════════════ BOTTOM ROW: Calibration + Logs ═══════════════════ -->
-    <div class="admin-bottom">
-
-      <!-- Servo Calibration -->
-      <div class="card">
-        <div class="card-title"><span class="icon">📐</span> Servo Calibration &amp; Safety Limits</div>
-        <p style="font-size: 0.72rem; color: var(--text-muted); margin-bottom: var(--gap-md);">
-          Set min/max angle bounds per servo to prevent mechanical collisions. Values clamped server-side.
-        </p>
-        <div id="calibrationPanel"></div>
-        <div style="margin-top: var(--gap-md); display: flex; gap: var(--gap-sm);">
-          <button class="btn btn-primary" id="btnApplyCalibration">✅ Apply Limits</button>
-          <button class="btn" id="btnResetCalibration">↩ Reset to Defaults</button>
-        </div>
-      </div>
-
-      <!-- Logs -->
-      <div style="display: flex; flex-direction: column; gap: var(--gap-lg);">
-        <!-- Serial Packet Monitor -->
+        <!-- CONSOLE -->
         <div class="card">
           <div class="console-header">
-            <div class="card-title" style="margin-bottom:0;"><span class="icon">🖥️</span> Serial Packet Monitor</div>
+            <div class="tabs">
+              <div class="tab active tab-btn" data-tab="serial">SERIAL PACKET MONITOR (<span id="serialCount">0</span>)</div>
+              <div class="tab tab-btn" data-tab="command">COMMAND LOG (<span id="commandCount">0</span>)</div>
+              <div class="tab tab-btn" data-tab="event">EVENT LOG (<span id="eventCount">0</span>)</div>
+            </div>
             <div class="console-filters">
-              <button class="btn btn-sm btn-primary" id="btnFilterAll" data-filter="all">All</button>
-              <button class="btn btn-sm" id="btnFilterTx" data-filter="tx">TX</button>
-              <button class="btn btn-sm" id="btnFilterRx" data-filter="rx">RX</button>
-              <button class="btn btn-sm btn-danger" id="btnClearConsole">Clear</button>
+              <button class="btn-outline cyan" id="btnFilterAll" data-filter="all">ALL</button>
+              <button class="btn-outline" style="border-color:var(--border-subtle);" id="btnFilterTx" data-filter="tx">TX</button>
+              <button class="btn-outline" style="border-color:var(--border-subtle);" id="btnFilterRx" data-filter="rx">RX</button>
+              <button class="btn-outline red" id="btnClearConsole">CLEAR</button>
             </div>
           </div>
-          <div class="console-output" id="consoleOutput" style="max-height: 180px;">
-            <span class="sys">[SYS] Serial console ready. Awaiting connection...</span>
+          
+          <div class="console-window tab-content active" id="tabSerial">
+            <div id="consoleOutput"><span style="color:var(--accent-yellow)">[SYS] Serial console ready. Awaiting connection...</span></div>
+          </div>
+          <div class="console-window tab-content" id="tabCommand">
+            <div id="commandLog"><span style="color:var(--accent-yellow)">[SYS] Command log initialized</span></div>
+          </div>
+          <div class="console-window tab-content" id="tabEvent">
+            <div id="eventLog"><span style="color:var(--accent-yellow)">[SYS] Admin dashboard initialized</span></div>
           </div>
         </div>
 
-        <!-- Command & Event Log -->
-        <div class="card">
-          <div class="card-title"><span class="icon">📋</span> Command &amp; Event Log</div>
-          <div class="console-output" id="eventLog" style="max-height: 180px;">
-            <span class="sys">[SYS] Admin dashboard initialized</span>
-          </div>
-        </div>
       </div>
     </div>
 
   </div>
 
-  <script src="admin.js"></script>
+  <script src="admin.js?v=2"></script>
 </body>
 </html>

@@ -63,6 +63,9 @@ const MAX_CONSOLE_LINES = 500;
 /** Maximum lines in event log. */
 const MAX_EVENT_LINES = 200;
 
+/** Maximum lines in command log. */
+const MAX_COMMAND_LINES = 200;
+
 /* ===========================================================================
  *  STATE VARIABLES (volatile globals in C terms)
  * ========================================================================= */
@@ -151,6 +154,14 @@ const DOM = {
 
   // Event log
   eventLog:            document.getElementById('eventLog'),
+
+  // Command log (tabbed console)
+  commandLog:          document.getElementById('commandLog'),
+
+  // Tab count indicators
+  serialCount:         document.getElementById('serialCount'),
+  commandCount:        document.getElementById('commandCount'),
+  eventCount:          document.getElementById('eventCount'),
 };
 
 /* ===========================================================================
@@ -376,6 +387,7 @@ function handleServerMessage(msg) {
     /* ── Command sent notification ── */
     case 'command_sent':
       logEvent('sys', `CMD: ${msg.command} by ${msg.source} (${msg.sourceRole})`);
+      logCommand('sys', `CMD: ${msg.command} by ${msg.source} (${msg.sourceRole})`);
       appendConsole('tx', msg.raw, Date.now());
       break;
 
@@ -464,12 +476,12 @@ DOM.btnEstop.addEventListener('mousedown', (e) => {
   if (!eStopEngaged) return; // Only applies when trying to release
 
   estopReleaseProgress = 0;
-  DOM.btnEstop.innerHTML = '<span style="font-size: 1.4rem;">🔴</span>HOLD...<br><span style="font-size:0.55rem;">0%</span>';
+  DOM.btnEstop.innerHTML = '<span style="font-size: 1.8rem;">🔴</span>HOLD...<br><span style="font-size:0.52rem;">0%</span>';
 
   estopReleaseTimer = setInterval(() => {
     estopReleaseProgress += 100;
     const pct = Math.min((estopReleaseProgress / 2000) * 100, 100);
-    DOM.btnEstop.innerHTML = `<span style="font-size: 1.4rem;">🔴</span>HOLD...<br><span style="font-size:0.55rem;">${Math.round(pct)}%</span>`;
+    DOM.btnEstop.innerHTML = `<span style="font-size: 1.8rem;">🔴</span>HOLD...<br><span style="font-size:0.52rem;">${Math.round(pct)}%</span>`;
 
     if (estopReleaseProgress >= 2000) {
       clearInterval(estopReleaseTimer);
@@ -491,7 +503,7 @@ function cancelEstopRelease() {
     estopReleaseTimer = null;
     estopReleaseProgress = 0;
     if (eStopEngaged) {
-      DOM.btnEstop.innerHTML = '<span style="font-size: 1.4rem;">🔴</span>ENGAGED<br><span style="font-size:0.55rem;opacity:0.7;">hold to release</span>';
+      DOM.btnEstop.innerHTML = '<span style="font-size: 1.8rem;">🔴</span>ENGAGED<br><span style="font-size:0.52rem;opacity:0.7;">hold to release</span>';
     }
   }
 }
@@ -500,9 +512,16 @@ function updateEstopUI() {
   DOM.btnEstop.classList.toggle('engaged', eStopEngaged);
 
   if (eStopEngaged) {
-    DOM.btnEstop.innerHTML = '<span style="font-size: 1.4rem;">🔴</span>ENGAGED<br><span style="font-size:0.55rem;opacity:0.7;">hold to release</span>';
+    DOM.btnEstop.innerHTML = '<span style="font-size: 1.8rem;">🔴</span>ENGAGED<br><span style="font-size:0.52rem;opacity:0.7;">hold to release</span>';
   } else {
-    DOM.btnEstop.innerHTML = '<span style="font-size: 1.4rem;">⛔</span>E-STOP';
+    DOM.btnEstop.innerHTML = '<span style="font-size: 2rem;">⛔</span>E-STOP';
+  }
+
+  // Sync horizontal E-STOP button
+  const horizBtn = document.getElementById('btnEstopHoriz');
+  const horizLabel = document.getElementById('estopHorizLabel');
+  if (horizBtn) {
+    if (horizLabel) horizLabel.textContent = eStopEngaged ? 'ENGAGED' : 'ENGAGE';
   }
 }
 
@@ -525,12 +544,19 @@ function updateTakeoverUI() {
 
   if (userInputLocked) {
     btn.classList.add('engaged');
-    btn.innerHTML = '<span style="font-size: 2.2rem;">⚡</span>RELEASE';
-    if (speedCtrl) speedCtrl.style.display = 'block';
+    btn.innerHTML = '<span style="font-size: 2rem;">⚡</span>RELEASE';
+    if (speedCtrl) speedCtrl.style.display = 'flex';
   } else {
     btn.classList.remove('engaged');
-    btn.innerHTML = '<span style="font-size: 2.2rem;">⚡</span>TAKE<br>OVER';
+    btn.innerHTML = '<span style="font-size: 2rem;">⚡</span>TAKE<br>OVER';
     if (speedCtrl) speedCtrl.style.display = 'none';
+  }
+
+  // Sync horizontal Lock button
+  const horizBtn = document.getElementById('btnLockHoriz');
+  const horizLabel = document.getElementById('lockHorizLabel');
+  if (horizBtn) {
+    if (horizLabel) horizLabel.textContent = userInputLocked ? '(TAKEOVER ACTIVE)' : '(INACTIVE)';
   }
 }
 
@@ -678,12 +704,29 @@ function appendConsole(type, data, timestamp) {
 
   // Auto-scroll to bottom (like a terminal with auto-follow)
   DOM.consoleOutput.scrollTop = DOM.consoleOutput.scrollHeight;
+
+  // Update tab count
+  if (DOM.serialCount) DOM.serialCount.textContent = consoleLinesCount;
 }
 
-/** Clear console. */
+/** Clear console — clears the active tab's console. */
 DOM.btnClearConsole.addEventListener('click', () => {
-  DOM.consoleOutput.innerHTML = '<span class="sys">[SYS] Console cleared</span>';
-  consoleLinesCount = 1;
+  const activeTab = document.querySelector('.tab-btn.active');
+  const tabId = activeTab ? activeTab.dataset.tab : 'serial';
+
+  if (tabId === 'serial') {
+    DOM.consoleOutput.innerHTML = '<span class="sys">[SYS] Console cleared</span>';
+    consoleLinesCount = 1;
+    if (DOM.serialCount) DOM.serialCount.textContent = '0';
+  } else if (tabId === 'command' && DOM.commandLog) {
+    DOM.commandLog.innerHTML = '<span class="sys">[SYS] Command log cleared</span>';
+    commandLogCount = 1;
+    if (DOM.commandCount) DOM.commandCount.textContent = '0';
+  } else if (tabId === 'event') {
+    DOM.eventLog.innerHTML = '<span class="sys">[SYS] Event log cleared</span>';
+    eventLogCount = 1;
+    if (DOM.eventCount) DOM.eventCount.textContent = '0';
+  }
 });
 
 /** Console filter buttons. */
@@ -695,6 +738,23 @@ document.querySelectorAll('[data-filter]').forEach(btn => {
     document.querySelectorAll('[data-filter]').forEach(b => {
       b.className = `btn btn-sm ${b.dataset.filter === consoleFilter ? 'btn-primary' : ''}`;
     });
+  });
+});
+
+/* ===========================================================================
+ *  TAB SWITCHING LOGIC
+ * ========================================================================= */
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    // Deactivate all tabs
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+
+    // Activate clicked tab
+    btn.classList.add('active');
+    const tabMap = { serial: 'tabSerial', command: 'tabCommand', event: 'tabEvent' };
+    const panel = document.getElementById(tabMap[btn.dataset.tab]);
+    if (panel) panel.classList.add('active');
   });
 });
 
@@ -742,10 +802,10 @@ function updateJointReadout(joints) {
   for (const j of JOINT_CONFIG) {
     const val = joints[j.key] !== undefined ? joints[j.key] : '--';
     const card = document.createElement('div');
-    card.className = 'stat-card';
+    card.className = 'joint-stat';
     card.innerHTML = `
-      <span class="stat-number">${val}°</span>
-      <span class="stat-desc">${j.icon} ${j.label}</span>
+      <span class="val">${val}°</span>
+      <span class="lbl">${j.icon} ${j.label}</span>
     `;
     DOM.jointReadout.appendChild(card);
   }
@@ -1052,7 +1112,7 @@ window.kickClient = kickClient;
 function updateClientList(clientsList) {
   lastKnownClients = clientsList;
   if (!clientsList || clientsList.length === 0) {
-    DOM.clientList.innerHTML = '<div style="color: var(--text-muted); font-size: 0.72rem; font-family: var(--font-mono);">No clients connected</div>';
+    DOM.clientList.innerHTML = '<div class="text-muted" style="font-size: 0.72rem; font-family: var(--font-mono);">No clients connected</div>';
     return;
   }
 
@@ -1060,29 +1120,28 @@ function updateClientList(clientsList) {
   for (const client of clientsList) {
     const item = document.createElement('div');
     item.className = 'client-item';
+    if (activeDriverId === client.id) item.classList.add('selected');
 
-    const roleBadgeClass = client.role === 'admin' ? 'badge-yellow' : 'badge-cyan';
-    const usernameStr = client.username ? ` (${escapeHtml(client.username)})` : '';
+    const roleBadgeClass = client.role === 'admin' ? 'badge-admin' : 'badge-user';
+    const usernameStr = client.username ? ` ${escapeHtml(client.username)}` : '';
     
     const infoDiv = document.createElement('div');
-    infoDiv.style.display = 'flex';
-    infoDiv.style.alignItems = 'center';
-    infoDiv.style.gap = 'var(--gap-sm)';
+    infoDiv.className = 'client-info';
     infoDiv.innerHTML = `
-      <span class="client-id">${escapeHtml(client.id)}${usernameStr}</span>
-      <span class="badge ${roleBadgeClass}">${client.role}</span>
-      ${activeDriverId === client.id ? '<span class="badge badge-green">DRIVER</span>' : ''}
+      <span style="color: var(--text-muted);">👤</span>
+      <span style="font-weight:600; color:white;">${escapeHtml(client.id)}${usernameStr}</span>
+      <span class="${roleBadgeClass}">${client.role.toUpperCase()}</span>
+      ${activeDriverId === client.id ? '<span class="badge-user">DRIVER</span>' : ''}
     `;
 
     const actionsDiv = document.createElement('div');
-    actionsDiv.style.display = 'flex';
-    actionsDiv.style.gap = '4px';
+    actionsDiv.className = 'client-actions';
 
     if (client.role === 'user') {
       if (activeDriverId === client.id) {
         const btnRevoke = document.createElement('button');
-        btnRevoke.className = 'btn btn-sm btn-danger';
-        btnRevoke.textContent = 'Revoke';
+        btnRevoke.className = 'btn-outline red';
+        btnRevoke.textContent = 'REVOKE';
         btnRevoke.addEventListener('click', (e) => {
           e.stopPropagation();
           setDriver(null);
@@ -1090,8 +1149,8 @@ function updateClientList(clientsList) {
         actionsDiv.appendChild(btnRevoke);
       } else {
         const btnGrant = document.createElement('button');
-        btnGrant.className = 'btn btn-sm btn-primary';
-        btnGrant.textContent = 'Grant Control';
+        btnGrant.className = 'btn-outline cyan';
+        btnGrant.textContent = 'GRANT CONTROL';
         btnGrant.addEventListener('click', (e) => {
           e.stopPropagation();
           setDriver(client.id);
@@ -1100,9 +1159,8 @@ function updateClientList(clientsList) {
       }
 
       const btnKick = document.createElement('button');
-      btnKick.className = 'btn btn-sm btn-danger';
-      btnKick.textContent = '⏻ Logout';
-      btnKick.title = 'Logout this user';
+      btnKick.className = 'btn-outline red';
+      btnKick.textContent = 'KICK';
       btnKick.addEventListener('click', (e) => {
         e.stopPropagation();
         kickClient(client.id);
@@ -1165,8 +1223,14 @@ function updateAuthRequests(requests) {
     const item = document.createElement('div');
     item.className = 'client-item';
     item.innerHTML = `
-      <span class="client-id">${escapeHtml(req.username)}</span>
-      <span class="badge badge-yellow" style="font-size: 1rem; letter-spacing: 2px;">${req.code}</span>
+      <div class="client-info">
+        <span style="color:var(--text-muted)">👤</span>
+        <span style="font-weight:600; color:white;">Login Request: ${escapeHtml(req.username)}</span>
+      </div>
+      <div class="client-actions">
+        <div style="font-size:0.6rem; color:var(--text-muted); text-transform:uppercase; margin-right:6px;">OTP PIN:</div>
+        <span class="badge-admin" style="font-size:1.1rem; padding: 4px 12px; letter-spacing:3px; background:rgba(245, 158, 11, 0.15);">${req.code}</span>
+      </div>
     `;
     DOM.authRequestsList.appendChild(item);
   }
@@ -1182,7 +1246,7 @@ function updateAuthRequests(requests) {
  *    if (angle > SERVO_MAX[n]) angle = SERVO_MAX[n];
  */
 
-/** Build the calibration input rows. */
+/** Build the calibration input rows (compact layout for side-by-side panel). */
 function buildCalibrationPanel(limits) {
   DOM.calibrationPanel.innerHTML = '';
 
@@ -1190,18 +1254,14 @@ function buildCalibrationPanel(limits) {
     const lim = (limits && limits[j.key]) ? limits[j.key] : { min: 0, max: 180 };
 
     const row = document.createElement('div');
-    row.className = 'calibration-row';
+    row.className = 'cal-row';
 
     row.innerHTML = `
-      <span class="slider-label">${j.icon} ${j.label}</span>
-      <div style="display:flex; align-items:center; gap: var(--gap-xs);">
-        <span style="font-size:0.65rem; color:var(--text-muted);">MIN</span>
-        <input type="number" class="text-input" id="cal_min_${j.key}" min="0" max="180" value="${lim.min}">
-      </div>
-      <div style="display:flex; align-items:center; gap: var(--gap-xs);">
-        <span style="font-size:0.65rem; color:var(--text-muted);">MAX</span>
-        <input type="number" class="text-input" id="cal_max_${j.key}" min="0" max="180" value="${lim.max}">
-      </div>
+      <span class="cal-lbl">${j.icon} ${j.label}</span>
+      <span>MIN</span>
+      <input type="number" id="cal_min_${j.key}" min="0" max="180" value="${lim.min}">
+      <span>MAX</span>
+      <input type="number" id="cal_max_${j.key}" min="0" max="180" value="${lim.max}">
     `;
 
     DOM.calibrationPanel.appendChild(row);
@@ -1274,6 +1334,7 @@ DOM.btnResetCalibration.addEventListener('click', () => {
  * ========================================================================= */
 
 let eventLogCount = 0;
+let commandLogCount = 0;
 
 function logEvent(type, message) {
   const line = document.createElement('div');
@@ -1291,6 +1352,33 @@ function logEvent(type, message) {
   }
 
   DOM.eventLog.scrollTop = DOM.eventLog.scrollHeight;
+
+  // Update tab count
+  if (DOM.eventCount) DOM.eventCount.textContent = eventLogCount;
+}
+
+/** Log a command event to the Command Log tab. */
+function logCommand(type, message) {
+  if (!DOM.commandLog) return;
+
+  const line = document.createElement('div');
+  const timeStr = formatTimestamp(Date.now());
+
+  line.innerHTML = `<span class="timestamp">[${timeStr}]</span><span class="${type}">${escapeHtml(message)}</span>`;
+
+  DOM.commandLog.appendChild(line);
+  commandLogCount++;
+
+  // Circular buffer eviction
+  while (commandLogCount > MAX_COMMAND_LINES) {
+    DOM.commandLog.removeChild(DOM.commandLog.firstChild);
+    commandLogCount--;
+  }
+
+  DOM.commandLog.scrollTop = DOM.commandLog.scrollHeight;
+
+  // Update tab count
+  if (DOM.commandCount) DOM.commandCount.textContent = commandLogCount;
 }
 
 /* ===========================================================================

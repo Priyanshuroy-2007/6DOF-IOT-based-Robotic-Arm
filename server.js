@@ -52,8 +52,8 @@ const CONFIG = {
   ADMIN_TOKEN:      process.env.ADMIN_TOKEN || 'PR29',
 
   // Watchdog interval & timeout (ms) — maps to STM32 IWDG prescaler/reload
-  WATCHDOG_INTERVAL: 500,
-  HEARTBEAT_TIMEOUT: 1500,
+  WATCHDOG_INTERVAL: 1000,
+  HEARTBEAT_TIMEOUT: 10000,
 
   // Throttle gate — max send rate to serial (50Hz = 20ms period)
   // Like a SysTick-gated output timer on the MCU
